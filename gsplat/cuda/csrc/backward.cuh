@@ -73,6 +73,7 @@ void rasterize_backward_impl(
 
 __device__ void project_cov3d_ewa_vjp(
     const float3 &p_view,
+    const float *viewmat,
     const float *cov3d,
     const float fx,
     const float fy,

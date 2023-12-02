@@ -64,7 +64,7 @@ __global__ void project_gaussians_forward_kernel(
     float tan_fovx = 0.5 * img_size.x / fx;
     float tan_fovy = 0.5 * img_size.y / fy;
     float3 cov2d = project_cov3d_ewa(
-        p_view, cur_cov3d, fx, fy, tan_fovx, tan_fovy
+        p_view, viewmat, cur_cov3d, fx, fy, tan_fovx, tan_fovy
     );
     // printf("cov2d %d, %.2f %.2f %.2f\n", idx, cov2d.x, cov2d.y, cov2d.z);
 
@@ -602,6 +602,7 @@ void rasterize_forward_impl(
 // device helper to approximate projected 2d cov from 3d mean and cov
 __device__ float3 project_cov3d_ewa(
     const float3& __restrict__ p_view,
+    const float* __restrict__ viewmat,
     const float* __restrict__ cov3d,
     const float fx,
     const float fy,
@@ -618,33 +619,29 @@ __device__ float3 project_cov3d_ewa(
     float rz = 1.f / t.z;
     float rz2 = rz * rz;
 
-    // column major
+    // clang-format off
+    // viewmat is row major, glm is column major
+    // upper 3x3 submatrix
+    glm::mat3 W = glm::mat3(
+        viewmat[0], viewmat[4], viewmat[8],
+        viewmat[1], viewmat[5], viewmat[9],
+        viewmat[2], viewmat[6], viewmat[10]
+    );
     // we only care about the top 2x2 submatrix
     glm::mat3 J = glm::mat3(
-        fx * rz,
-        0.f,
-        0.f,
-        0.f,
-        fy * rz,
-        0.f,
-        -fx * t.x * rz2,
-        -fy * t.y * rz2,
-        0.f
+        fx * rz,         0.f,             0.f,
+        0.f,             fy * rz,         0.f,
+        -fx * t.x * rz2, -fy * t.y * rz2, 0.f
     );
     glm::mat3 T = J * W;
 
     glm::mat3 V = glm::mat3(
-        cov3d[0],
-        cov3d[1],
-        cov3d[2],
-        cov3d[1],
-        cov3d[3],
-        cov3d[4],
-        cov3d[2],
-        cov3d[4],
-        cov3d[5]
+        cov3d[0], cov3d[1], cov3d[2],
+        cov3d[1], cov3d[3], cov3d[4],
+        cov3d[2], cov3d[4], cov3d[5]
     );
     glm::mat3 cov = T * V * glm::transpose(T);
+    // clang-format on
 
     // add a little blur along axes and save upper triangular elements
     return make_float3(float(cov[0][0]) + 0.3f, float(cov[0][1]), float(cov[1][1]) + 0.3f);

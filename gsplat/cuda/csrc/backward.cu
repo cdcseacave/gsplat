@@ -438,6 +438,7 @@ __global__ void project_gaussians_backward_kernel(
     float3 p_view = transform_4x3(viewmat, p_world);
     project_cov3d_ewa_vjp(
         p_view,
+        viewmat,
         &(cov3d[6 * idx]),
         fx,
         fy,
@@ -507,6 +508,7 @@ void project_gaussians_backward_impl(
 // output space: 2D covariance, input space: cov3d
 __device__ void project_cov3d_ewa_vjp(
     const float3& __restrict__ p_view,
+    const float* __restrict__ viewmat,
     const float* __restrict__ cov3d,
     const float fx,
     const float fy,
@@ -518,9 +520,15 @@ __device__ void project_cov3d_ewa_vjp(
     float rz = 1.f / t.z;
     float rz2 = rz * rz;
 
-    // column major
-    // we only care about the top 2x2 submatrix
     // clang-format off
+    // we only care about the top 2x2 submatrix
+    // viewmat is row major, glm is column major
+    // upper 3x3 submatrix
+    glm::mat3 W = glm::mat3(
+        viewmat[0], viewmat[4], viewmat[8],
+        viewmat[1], viewmat[5], viewmat[9],
+        viewmat[2], viewmat[6], viewmat[10]
+    );
     glm::mat3 J = glm::mat3(
         fx * rz,         0.f,             0.f,
         0.f,             fy * rz,         0.f,
