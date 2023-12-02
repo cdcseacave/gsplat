@@ -280,7 +280,7 @@ __global__ void rasterize_backward_kernel(
                                         0.5f * v_sigma * delta.y * delta.y};
                 v_xy_local = {v_sigma * (conic.x * delta.x + conic.y * delta.y), 
                                     v_sigma * (conic.y * delta.x + conic.z * delta.y)};
-                v_opacity_local = vis * v_alpha;
+                v_opacity_local = vis * v_alpha + 1e-7f/*bias2zero*/;
             }
             warpSum3(v_rgb_local, warp);
             warpSum3(v_conic_local, warp);
@@ -435,10 +435,10 @@ __global__ void project_gaussians_backward_kernel(
     // get v_cov2d
     cov2d_to_conic_vjp(conics[idx], v_conic[idx], v_cov2d[idx]);
     // get v_cov3d (and v_mean3d contribution)
+    float3 p_view = transform_4x3(viewmat, p_world);
     project_cov3d_ewa_vjp(
-        p_world,
+        p_view,
         &(cov3d[6 * idx]),
-        viewmat,
         fx,
         fy,
         v_cov2d[idx],
@@ -506,26 +506,15 @@ void project_gaussians_backward_impl(
 
 // output space: 2D covariance, input space: cov3d
 __device__ void project_cov3d_ewa_vjp(
-    const float3& __restrict__ mean3d,
+    const float3& __restrict__ p_view,
     const float* __restrict__ cov3d,
-    const float* __restrict__ viewmat,
     const float fx,
     const float fy,
     const float3& __restrict__ v_cov2d,
     float3& __restrict__ v_mean3d,
     float* __restrict__ v_cov3d
 ) {
-    // viewmat is row major, glm is column major
-    // upper 3x3 submatrix
-    // clang-format off
-    glm::mat3 W = glm::mat3(
-        viewmat[0], viewmat[4], viewmat[8],
-        viewmat[1], viewmat[5], viewmat[9],
-        viewmat[2], viewmat[6], viewmat[10]
-    );
-    // clang-format on
-    glm::vec3 p = glm::vec3(viewmat[3], viewmat[7], viewmat[11]);
-    glm::vec3 t = W * glm::vec3(mean3d.x, mean3d.y, mean3d.z) + p;
+    glm::vec3 t(p_view.x, p_view.y, p_view.z);
     float rz = 1.f / t.z;
     float rz2 = rz * rz;
 

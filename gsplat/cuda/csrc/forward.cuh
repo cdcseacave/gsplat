@@ -83,9 +83,8 @@ void nd_rasterize_forward_impl(
 
 // device helper to approximate projected 2d cov from 3d mean and cov
 __device__ float3 project_cov3d_ewa(
-    const float3 &mean3d,
+    const float3 &p_view,
     const float *cov3d,
-    const float *viewmat,
     const float fx,
     const float fy,
     const float tan_fovx,

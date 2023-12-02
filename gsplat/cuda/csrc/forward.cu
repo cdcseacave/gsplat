@@ -64,7 +64,7 @@ __global__ void project_gaussians_forward_kernel(
     float tan_fovx = 0.5 * img_size.x / fx;
     float tan_fovy = 0.5 * img_size.y / fy;
     float3 cov2d = project_cov3d_ewa(
-        p_world, cur_cov3d, viewmat, fx, fy, tan_fovx, tan_fovy
+        p_view, cur_cov3d, fx, fy, tan_fovx, tan_fovy
     );
     // printf("cov2d %d, %.2f %.2f %.2f\n", idx, cov2d.x, cov2d.y, cov2d.z);
 
@@ -601,34 +601,17 @@ void rasterize_forward_impl(
 
 // device helper to approximate projected 2d cov from 3d mean and cov
 __device__ float3 project_cov3d_ewa(
-    const float3& __restrict__ mean3d,
+    const float3& __restrict__ p_view,
     const float* __restrict__ cov3d,
-    const float* __restrict__ viewmat,
     const float fx,
     const float fy,
     const float tan_fovx,
     const float tan_fovy
 ) {
-    // clip the
-    // we expect row major matrices as input, glm uses column major
-    // upper 3x3 submatrix
-    glm::mat3 W = glm::mat3(
-        viewmat[0],
-        viewmat[4],
-        viewmat[8],
-        viewmat[1],
-        viewmat[5],
-        viewmat[9],
-        viewmat[2],
-        viewmat[6],
-        viewmat[10]
-    );
-    glm::vec3 p = glm::vec3(viewmat[3], viewmat[7], viewmat[11]);
-    glm::vec3 t = W * glm::vec3(mean3d.x, mean3d.y, mean3d.z) + p;
-
     // clip so that the covariance
     float lim_x = 1.3f * tan_fovx;
     float lim_y = 1.3f * tan_fovy;
+    glm::vec3 t(p_view.x, p_view.y, p_view.z);
     t.x = t.z * std::min(lim_x, std::max(-lim_x, t.x / t.z));
     t.y = t.z * std::min(lim_y, std::max(-lim_y, t.y / t.z));
 
@@ -661,7 +644,6 @@ __device__ float3 project_cov3d_ewa(
         cov3d[4],
         cov3d[5]
     );
-
     glm::mat3 cov = T * V * glm::transpose(T);
 
     // add a little blur along axes and save upper triangular elements
