@@ -140,4 +140,5 @@ class RasterizeGaussians(Function):
             None,  # img_height
             None,  # img_width
             None,  # background
+            None,  # bias2zero
         )
