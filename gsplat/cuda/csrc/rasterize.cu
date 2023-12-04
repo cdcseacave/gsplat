@@ -393,7 +393,8 @@ std::
         const torch::Tensor &background,
         const torch::Tensor &final_Ts,
         const torch::Tensor &final_idx,
-        const torch::Tensor &v_output // dL_dout_color
+        const torch::Tensor &v_output, // dL_dout_color
+        const float bias2zero
     ) {
 
     CHECK_INPUT(xys);
@@ -440,7 +441,8 @@ std::
         (float2 *)v_xy.contiguous().data_ptr<float>(),
         (float3 *)v_conic.contiguous().data_ptr<float>(),
         (float3 *)v_colors.contiguous().data_ptr<float>(),
-        v_opacity.contiguous().data_ptr<float>()
+        v_opacity.contiguous().data_ptr<float>(),
+        bias2zero
     );
 
     return std::make_tuple(v_xy, v_conic, v_colors, v_opacity);

@@ -68,7 +68,8 @@ void rasterize_backward_impl(
     float2 *v_xy,
     float3 *v_conic,
     float3 *v_rgb,
-    float *v_opacity
+    float *v_opacity,
+    const float bias2zero
 );
 
 __device__ void project_cov3d_ewa_vjp(

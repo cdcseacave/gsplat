@@ -44,6 +44,7 @@ class RasterizeGaussians(Function):
         img_height: int,
         img_width: int,
         background: Optional[Float[Tensor, "channels"]] = None,
+        bias2zero: float = 0,
     ):
         if colors.dtype == torch.uint8:
             # make sure colors are float [0,1]
@@ -79,6 +80,7 @@ class RasterizeGaussians(Function):
 
         ctx.img_width = img_width
         ctx.img_height = img_height
+        ctx.bias2zero = bias2zero
         ctx.save_for_backward(
             gaussian_ids_sorted,
             tile_bins,
@@ -97,6 +99,7 @@ class RasterizeGaussians(Function):
     def backward(ctx, v_out_img):
         img_height = ctx.img_height
         img_width = ctx.img_width
+        bias2zero = ctx.bias2zero
 
         (
             gaussian_ids_sorted,
@@ -123,6 +126,7 @@ class RasterizeGaussians(Function):
             final_Ts.contiguous().cuda(),
             final_idx.contiguous().cuda(),
             v_out_img.contiguous().cuda(),
+            bias2zero,
         )
 
         return (

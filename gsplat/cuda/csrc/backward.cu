@@ -149,7 +149,8 @@ __global__ void rasterize_backward_kernel(
     float2* __restrict__ v_xy,
     float3* __restrict__ v_conic,
     float3* __restrict__ v_rgb,
-    float* __restrict__ v_opacity
+    float* __restrict__ v_opacity,
+    const float bias2zero
 ) {
     auto block = cg::this_thread_block();
     int32_t tile_id =
@@ -280,9 +281,7 @@ __global__ void rasterize_backward_kernel(
                                         0.5f * v_sigma * delta.y * delta.y};
                 v_xy_local = {v_sigma * (conic.x * delta.x + conic.y * delta.y), 
                                     v_sigma * (conic.y * delta.x + conic.z * delta.y)};
-                //v_opacity_local = vis * v_alpha + __expf(opac*opac/-2e-3f) * 3e-8f/*bias2zero*/;
-                //v_opacity_local = vis * v_alpha + __expf(opac*opac/-1e-3f) * 1e-8f/*bias2zero*/;
-                v_opacity_local = vis * v_alpha + __expf(opac*opac/-3e-4f) * 1e-8f/*bias2zero*/;
+                v_opacity_local = vis * v_alpha + __expf(opac*opac/-1e-3f) * bias2zero/*good value 1e-8f*/;
             }
             warpSum3(v_rgb_local, warp);
             warpSum3(v_conic_local, warp);
@@ -370,7 +369,8 @@ void rasterize_backward_impl(
     float2* v_xy,
     float3* v_conic,
     float3* v_rgb,
-    float* v_opacity
+    float* v_opacity,
+    const float bias2zero
 ) {
     rasterize_backward_kernel<<<tile_bounds, block>>>(
         tile_bounds,
@@ -388,7 +388,8 @@ void rasterize_backward_impl(
         v_xy,
         v_conic,
         v_rgb,
-        v_opacity
+        v_opacity,
+        bias2zero
     );
 }
 
