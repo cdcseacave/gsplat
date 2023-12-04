@@ -281,7 +281,7 @@ __global__ void rasterize_backward_kernel(
                                         0.5f * v_sigma * delta.y * delta.y};
                 v_xy_local = {v_sigma * (conic.x * delta.x + conic.y * delta.y), 
                                     v_sigma * (conic.y * delta.x + conic.z * delta.y)};
-                v_opacity_local = vis * v_alpha + __expf(opac*opac/-1e-3f) * bias2zero/*good value 1e-8f*/;
+                v_opacity_local = vis * v_alpha + bias2zero/*good value 1e-8f*/;
             }
             warpSum3(v_rgb_local, warp);
             warpSum3(v_conic_local, warp);
