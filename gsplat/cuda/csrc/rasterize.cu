@@ -384,6 +384,7 @@ std::
     rasterize_backward_tensor(
         const unsigned img_height,
         const unsigned img_width,
+        const float bias2zero,
         const torch::Tensor &gaussians_ids_sorted,
         const torch::Tensor &tile_bins,
         const torch::Tensor &xys,
@@ -393,8 +394,7 @@ std::
         const torch::Tensor &background,
         const torch::Tensor &final_Ts,
         const torch::Tensor &final_idx,
-        const torch::Tensor &v_output, // dL_dout_color
-        const float bias2zero
+        const torch::Tensor &v_output // dL_dout_color
     ) {
 
     CHECK_INPUT(xys);
@@ -428,6 +428,7 @@ std::
         tile_bounds,
         block,
         img_size,
+        bias2zero,
         gaussians_ids_sorted.contiguous().data_ptr<int>(),
         (int2 *)tile_bins.contiguous().data_ptr<int>(),
         (float2 *)xys.contiguous().data_ptr<float>(),
@@ -441,8 +442,7 @@ std::
         (float2 *)v_xy.contiguous().data_ptr<float>(),
         (float3 *)v_conic.contiguous().data_ptr<float>(),
         (float3 *)v_colors.contiguous().data_ptr<float>(),
-        v_opacity.contiguous().data_ptr<float>(),
-        bias2zero
+        v_opacity.contiguous().data_ptr<float>()
     );
 
     return std::make_tuple(v_xy, v_conic, v_colors, v_opacity);

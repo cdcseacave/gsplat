@@ -136,6 +136,7 @@ inline __device__ void warpSum(float& val, cg::thread_block_tile<32>& tile){
 __global__ void rasterize_backward_kernel(
     const dim3 tile_bounds,
     const dim3 img_size,
+    const float bias2zero,
     const int32_t* __restrict__ gaussian_ids_sorted,
     const int2* __restrict__ tile_bins,
     const float2* __restrict__ xys,
@@ -149,8 +150,7 @@ __global__ void rasterize_backward_kernel(
     float2* __restrict__ v_xy,
     float3* __restrict__ v_conic,
     float3* __restrict__ v_rgb,
-    float* __restrict__ v_opacity,
-    const float bias2zero
+    float* __restrict__ v_opacity
 ) {
     auto block = cg::this_thread_block();
     int32_t tile_id =
@@ -356,6 +356,7 @@ void rasterize_backward_impl(
     const dim3 tile_bounds,
     const dim3 block,
     const dim3 img_size,
+    const float bias2zero,
     const int* gaussians_ids_sorted,
     const int2* tile_bins,
     const float2* xys,
@@ -369,12 +370,12 @@ void rasterize_backward_impl(
     float2* v_xy,
     float3* v_conic,
     float3* v_rgb,
-    float* v_opacity,
-    const float bias2zero
+    float* v_opacity
 ) {
     rasterize_backward_kernel<<<tile_bounds, block>>>(
         tile_bounds,
         img_size,
+        bias2zero,
         gaussians_ids_sorted,
         tile_bins,
         xys,
@@ -388,8 +389,7 @@ void rasterize_backward_impl(
         v_xy,
         v_conic,
         v_rgb,
-        v_opacity,
-        bias2zero
+        v_opacity
     );
 }
 

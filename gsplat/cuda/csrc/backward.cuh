@@ -55,6 +55,7 @@ void rasterize_backward_impl(
     const dim3 tile_bounds,
     const dim3 block,
     const dim3 img_size,
+    const float bias2zero,
     const int *gaussians_ids_sorted,
     const int2 *tile_bins,
     const float2 *xys,
@@ -68,8 +69,7 @@ void rasterize_backward_impl(
     float2 *v_xy,
     float3 *v_conic,
     float3 *v_rgb,
-    float *v_opacity,
-    const float bias2zero
+    float *v_opacity
 );
 
 __device__ void project_cov3d_ewa_vjp(

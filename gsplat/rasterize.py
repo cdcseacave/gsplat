@@ -116,6 +116,7 @@ class RasterizeGaussians(Function):
         v_xy, v_conic, v_colors, v_opacity = _C.rasterize_backward(
             img_height,
             img_width,
+            bias2zero,
             gaussian_ids_sorted.contiguous().cuda(),
             tile_bins,
             xys.contiguous().cuda(),
@@ -126,7 +127,6 @@ class RasterizeGaussians(Function):
             final_Ts.contiguous().cuda(),
             final_idx.contiguous().cuda(),
             v_out_img.contiguous().cuda(),
-            bias2zero,
         )
 
         return (
