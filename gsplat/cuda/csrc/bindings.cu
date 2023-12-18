@@ -226,8 +226,6 @@ project_gaussians_backward_tensor(
 
     float4 intrins = {fx, fy, cx, cy};
 
-    const auto num_cov3d = num_points * 6;
-
     // Triangular covariance.
     torch::Tensor v_cov2d =
         torch::zeros({num_points, 3}, means3d.options().dtype(torch::kFloat32));
@@ -560,6 +558,7 @@ std::
     rasterize_backward_tensor(
         const unsigned img_height,
         const unsigned img_width,
+        const float bias2zero,
         const torch::Tensor &gaussians_ids_sorted,
         const torch::Tensor &tile_bins,
         const torch::Tensor &xys,
@@ -602,6 +601,7 @@ std::
     rasterize_backward_kernel<<<tile_bounds, block>>>(
         tile_bounds,
         img_size,
+        bias2zero,
         gaussians_ids_sorted.contiguous().data_ptr<int>(),
         (int2 *)tile_bins.contiguous().data_ptr<int>(),
         (float2 *)xys.contiguous().data_ptr<float>(),
