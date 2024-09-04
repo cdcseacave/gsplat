@@ -38,7 +38,9 @@ __global__ void fully_fused_projection_fwd_kernel(
     T *__restrict__ means2d,      // [C, N, 2]
     T *__restrict__ depths,       // [C, N]
     T *__restrict__ conics,       // [C, N, 3]
-    T *__restrict__ compensations // [C, N] optional
+    T *__restrict__ compensations,// [C, N] optional
+    T *__restrict__ plane_depths, // [C, N, 2]
+    T *__restrict__ plane_normals // [C, N, 3]
 ) {
     // parallelize over C * N.
     uint32_t idx = cg::this_grid().thread_rank();
@@ -104,6 +106,9 @@ __global__ void fully_fused_projection_fwd_kernel(
     // perspective projection
     mat2<T> covar2d;
     vec2<T> mean2d;
+    glm::vec2 plane_depth;
+    glm::vec3 plane_normal;
+    float coef;
 
     if (ortho){
         ortho_proj<T>(
@@ -130,6 +135,16 @@ __global__ void fully_fused_projection_fwd_kernel(
             image_height,
             covar2d,
             mean2d
+        );
+        planeinfo_persp_proj<T>(
+            covar_c,
+            covar2d,
+            R,
+            t,
+            mean_c[2],
+            plane_depth,
+            plane_normal,
+            coef
         );
     }
 
@@ -173,6 +188,15 @@ __global__ void fully_fused_projection_fwd_kernel(
     conics[idx * 3 + 2] = covar2d_inv[1][1];
     if (compensations != nullptr) {
         compensations[idx] = compensation;
+    }
+    if (plane_depths != nullptr) {
+        plane_depths[idx * 2] = plane_depth.x;
+        plane_depths[idx * 2 + 1] = plane_depth.y;
+    }
+    if (plane_normals != nullptr) {
+        plane_normals[idx * 3] = plane_normal.x;
+        plane_normals[idx * 3 + 1] = plane_normal.y;
+        plane_normals[idx * 3 + 2] = plane_normal.z;
     }
 }
 

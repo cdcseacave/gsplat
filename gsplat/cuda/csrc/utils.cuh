@@ -373,6 +373,106 @@ inline __device__ void persp_proj_vjp(
                   2.f * fy * ty * rz3 * v_J[2][1];
 }
 
+inline __device__ void planeinfo_persp_proj(
+    // inputs
+    const glm::mat3 cov3d, const glm::mat2 cov2d, const glm::mat3 R, const glm::vec2 t, const float z,
+    // outputs
+    glm::vec2& plane_depth, glm::vec3& plane_normal, float& coef) {
+	const float det_0 = max(1e-6, cov2d[0][0] * cov2d[1][1] - cov2d[0][1] * cov2d[0][1]);
+	const float det_1 = max(1e-6, (cov2d[0][0] + kernel_size) * (cov2d[1][1] + kernel_size) - cov2d[0][1] * cov2d[0][1]);
+	coef = sqrt(det_0 / (det_1+1e-6) + 1e-6);
+	if (det_0 <= 1e-6 || det_1 <= 1e-6){
+		coef = 0.0f;
+	}
+
+    float rz = 1.f / z;
+    float rz2 = rz * rz;
+	float l = sqrt(t.x*t.x+t.y*t.y+z*z);
+
+	glm::mat3 Jn = glm::mat3(
+		rz, 0.f, -t.x * rz2,
+		0.f, rz, -t.y * rz2,
+		t.x/l, t.y/l, z/l);
+
+	glm::mat3 Vrk_eigen_vector;
+	glm::vec3 Vrk_eigen_value;
+	int D = glm::findEigenvaluesSymReal(cov3d,Vrk_eigen_value,Vrk_eigen_vector);
+
+	unsigned int min_id = Vrk_eigen_value[0]>Vrk_eigen_value[1]? (Vrk_eigen_value[1]>Vrk_eigen_value[2]?2:1):(Vrk_eigen_value[0]>Vrk_eigen_value[2]?2:0);
+
+	bool well_conditioned = Vrk_eigen_value[min_id]>0.00000001;
+	glm::mat3 Vrk_inv;
+	if(well_conditioned)
+	{
+		glm::mat3 diag = glm::mat3( 1/Vrk_eigen_value[0], 0, 0,
+									0, 1/Vrk_eigen_value[1], 0,
+									0, 0, 1/Vrk_eigen_value[2] );
+		Vrk_inv = Vrk_eigen_vector * diag * glm::transpose(Vrk_eigen_vector);
+	}
+	else
+	{
+        glm::vec3 eigenvector_min;
+		if(D<3)
+		{
+			const glm::vec3 eigenvector1 = Vrk_eigen_vector[(min_id+1)%3];
+			const glm::vec3 eigenvector2 = Vrk_eigen_vector[(min_id+2)%3];
+			eigenvector_min = glm::cross(eigenvector1, eigenvector2);
+		}
+		else{
+			eigenvector_min = Vrk_eigen_vector[min_id];
+		}
+		Vrk_inv = glm::outerProduct(eigenvector_min,eigenvector_min);
+	}
+	
+	const float txtz = t.x / z;
+	const float tytz = t.y / z;
+	glm::mat3 cov_cam_inv = glm::transpose(R) * Vrk_inv * R;
+	glm::vec3 uvh = {txtz, tytz, 1};
+	glm::vec3 uvh_m = cov_cam_inv * uvh;
+	glm::vec3 uvh_mn = glm::normalize(uvh_m);
+	if(isnan(uvh_mn.x))
+	{
+		plane_depth = glm::vec({0, 0});
+		plane_normal = glm::vec({0, 0, 0});
+	}
+	else
+	{
+		float u2 = txtz * txtz;
+		float v2 = tytz * tytz;
+		float uv = txtz * tytz;
+
+		glm::mat3 nJ_inv = glm::mat3(
+			v2 + 1,	-uv, 		0,
+			-uv,	u2 + 1,		0,
+			-txtz,	-tytz,		0
+		);
+
+
+		float vb = glm::dot(uvh_mn, uvh);
+		float factor = t.z / (u2+v2+1);
+		float factor_normal = l / (u2+v2+1);
+		glm::vec3 plane = nJ_inv * (uvh_mn/max(vb,0.0000001f));
+		glm::vec2 ray_depth_plane = {plane[0]*factor, plane[1]*factor};
+		glm::vec3 ray_normal_vector = {-plane[0]*factor_normal, -plane[1]*factor_normal, -1};
+		glm::vec3 cam_normal_vector = Jn * ray_normal_vector;
+		glm::vec3 normal_vector = glm::normalize(cam_normal_vector);
+
+		plane_depth = ray_depth_plane;
+		plane_normal = normal_vector;
+	}
+}
+
+inline __device__ void planeinfo_persp_proj_vjp(
+    // fwd inputs
+    const glm::mat3 cov3d, const glm::mat2 cov2d, const glm::mat3 R, const glm::vec2 t, const float z,
+    // outputs
+    float3* planeinfo, float& coef) {
+    // grad outputs
+    const glm::vec3 v_p_c,
+    // grad inputs
+    glm::mat3 &v_R, glm::vec3 &v_t, glm::vec3 &v_p) {
+}
+
 template <typename T>
 inline __device__ void pos_world_to_cam(
     // [R, t] is the world-to-camera transformation
