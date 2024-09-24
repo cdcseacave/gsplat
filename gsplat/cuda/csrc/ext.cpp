@@ -81,4 +81,23 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "rasterize_to_indices_in_range_2dgs",
         &gsplat::rasterize_to_indices_in_range_2dgs_tensor
     );
+
+    // RaDe-GS
+    m.def(
+        "fully_fused_projection_fwd_radegs",
+        &gsplat::fully_fused_projection_fwd_radegs_tensor
+    );
+    m.def(
+        "fully_fused_projection_bwd_radegs",
+        &gsplat::fully_fused_projection_bwd_radegs_tensor
+    );
+
+    m.def(
+        "rasterize_to_pixels_fwd_radegs",
+        &gsplat::rasterize_to_pixels_fwd_radegs_tensor
+    );
+    m.def(
+        "rasterize_to_pixels_bwd_radegs",
+        &gsplat::rasterize_to_pixels_bwd_radegs_tensor
+    );
 }

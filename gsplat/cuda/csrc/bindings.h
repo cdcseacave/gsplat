@@ -481,6 +481,117 @@ fully_fused_projection_packed_bwd_2dgs_tensor(
     const bool sparse_grad
 );
 
+//====== RaDe-GS ======//
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+fully_fused_projection_fwd_radegs_tensor(
+    const torch::Tensor &means,                // [N, 3]
+    const at::optional<torch::Tensor> &quats,  // [N, 4] optional
+    const at::optional<torch::Tensor> &scales, // [N, 3] optional
+    const torch::Tensor &viewmats,             // [C, 4, 4]
+    const torch::Tensor &Ks,                   // [C, 3, 3]
+    const uint32_t image_width,
+    const uint32_t image_height,
+    const float eps2d,
+    const float near_plane,
+    const float far_plane,
+    const float radius_clip,
+    const bool calc_compensations,
+    const bool ortho
+);
+
+    std::tuple<
+            torch::Tensor,
+            torch::Tensor,
+            torch::Tensor,
+            torch::Tensor>
+    fully_fused_projection_bwd_radegs_tensor(
+            // fwd inputs
+            const torch::Tensor &means,                // [N, 3]
+            const at::optional<torch::Tensor> &quats,  // [N, 4] optional
+            const at::optional<torch::Tensor> &scales, // [N, 3] optional
+            const torch::Tensor &viewmats,             // [C, 4, 4]
+            const torch::Tensor &Ks,                   // [C, 3, 3]
+            const uint32_t image_width,
+            const uint32_t image_height,
+//            const float eps2d,
+//            const bool ortho,
+            // fwd outputs
+            const torch::Tensor &radii,                       // [C, N]
+            const torch::Tensor &conics,                      // [C, N, 3]
+//            const at::optional<torch::Tensor> &compensations, // [C, N] optional
+            // grad outputs
+            const torch::Tensor &v_means2d,                     // [C, N, 2]
+            const torch::Tensor &v_depths,                      // [C, N]
+            const torch::Tensor &v_conics,                      // [C, N, 3]
+//            const at::optional<torch::Tensor> &v_compensations, // [C, N] optional
+            const bool viewmats_requires_grad
+    );
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+rasterize_to_pixels_fwd_radegs_tensor(
+    // Gaussian parameters
+    const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
+    const torch::Tensor &conics,    // [C, N, 3] or [nnz, 3]
+    const torch::Tensor &colors,    // [C, N, channels] or [nnz, channels]
+    const torch::Tensor &opacities, // [C, N]  or [nnz]
+    const torch::Tensor &camera_planes,
+    const torch::Tensor &ray_planes,
+    const torch::Tensor &ts,
+    const torch::Tensor &K,
+    const torch::Tensor &normals,
+    const at::optional<torch::Tensor> &backgrounds, // [C, channels]
+    const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
+    // image size
+    const uint32_t image_width,
+    const uint32_t image_height,
+    const uint32_t tile_size,
+    // intersections
+    const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
+    const torch::Tensor &flatten_ids   // [n_isects]
+);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+rasterize_to_pixels_bwd_radegs_tensor(
+    // Gaussian parameters
+    const torch::Tensor &means2d,                   // [C, N, 2] or [nnz, 2]
+    const torch::Tensor &conics,                    // [C, N, 3] or [nnz, 3]
+    const torch::Tensor &colors,                    // [C, N, 3] or [nnz, 3]
+    const torch::Tensor &opacities,                 // [C, N] or [nnz]
+    const at::optional<torch::Tensor> &backgrounds, // [C, 3]
+    const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
+    // image size
+    const uint32_t image_width,
+    const uint32_t image_height,
+    const uint32_t tile_size,
+    // intersections
+    const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
+    const torch::Tensor &flatten_ids,  // [n_isects]
+    // forward outputs
+    const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
+    const torch::Tensor &last_ids,      // [C, image_height, image_width]
+    // gradients of outputs
+    const torch::Tensor &v_render_colors, // [C, image_height, image_width, 3]
+    const torch::Tensor &v_render_alphas, // [C, image_height, image_width, 1]
+    // options
+    bool absgrad
+);
+
 } // namespace gsplat
 
 #endif // GSPLAT_CUDA_BINDINGS_H

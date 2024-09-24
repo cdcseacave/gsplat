@@ -3,6 +3,8 @@
 cmake_minimum_required(VERSION 3.12)
 project(gsplat LANGUAGES CXX CUDA)
 
+set(PYTHON_EXECUTABLE "/home/paul/bin/anaconda3/envs/nerfstudio-gsplat2/bin/python")
+
 # Set version
 set(GSPLAT_VERSION "0.1")
 
@@ -11,6 +13,16 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Define CUDA flags
 set(NVCC_FLAGS "-O3 --use_fast_math")
+#set(NVCC_FLAGS "-G -g -lineinfo")
+
+execute_process(
+        COMMAND python -c "import sys; print(sys.executable)"
+        RESULT_VARIABLE _result
+        OUTPUT_VARIABLE _python_prefix_path
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+message("Result: ${_result}")
+message("Python path: ${_python_prefix_path}")
 
 # Get the Torch path from Python
 execute_process(
@@ -37,6 +49,9 @@ include_directories(${PYTHON_INCLUDE_DIRS})
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/third_party/glm)
 
+include_directories(${TORCH_INCLUDE_DIRS})
+message(STATUS "Torch include dirs: ${TORCH_INCLUDE_DIRS}")
+
 # Set up CUDA flags
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${NVCC_FLAGS}")
 
@@ -48,6 +63,8 @@ file(GLOB_RECURSE SOURCES
 # Create the library
 add_library(gsplat STATIC ${SOURCES})
 
+target_include_directories(gsplat PUBLIC ${TORCH_INCLUDE_DIRS})
+
 # Link libraries
 target_link_libraries(gsplat ${TORCH_LIBRARIES} ${PYTHON_LIBRARIES})
 
@@ -56,6 +73,7 @@ set_target_properties(gsplat PROPERTIES
     VERSION ${GSPLAT_VERSION}
     SOVERSION 1
 )
+target_link_libraries(gsplat ${TORCH_LIBRARIES} ${PYTHON_LIBRARIES})
 
 # Install targets
 install(TARGETS gsplat
@@ -63,4 +81,9 @@ install(TARGETS gsplat
     LIBRARY DESTINATION lib
 )
 
+add_executable(test_splat test.cpp)
+target_link_libraries(test_splat ${TORCH_LIBRARIES} ${PYTHON_LIBRARIES} gsplat)
+target_include_directories(test_splat PUBLIC ${TORCH_INCLUDE_DIRS})
+
 message(STATUS "CMake configuration done!")
+
