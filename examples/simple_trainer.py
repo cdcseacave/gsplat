@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
+import tifffile
 import imageio
 import nerfview
 import numpy as np
@@ -27,7 +28,7 @@ from utils import AppearanceOptModule, CameraOptModule, knn, rgb_to_sh, set_rand
 
 from gsplat.compression import PngCompression
 from gsplat.distributed import cli
-from gsplat.rendering import rasterization
+from gsplat.rendering import rasterization, rasterization_radegs
 from gsplat.strategy import DefaultStrategy, MCMCStrategy
 
 
@@ -132,7 +133,7 @@ class Config:
     app_opt_reg: float = 1e-6
 
     # Enable depth loss. (experimental)
-    depth_loss: bool = False
+    depth_loss: bool = True
     # Weight for depth loss
     depth_lambda: float = 1e-2
 
@@ -142,6 +143,8 @@ class Config:
     tb_save_image: bool = False
 
     lpips_net: Literal["vgg", "alex"] = "alex"
+
+    rasterization_method: Literal["gs3d", "radegs"] = "gs3d"
 
     def adjust_steps(self, factor: float):
         self.eval_steps = [int(i * factor) for i in self.eval_steps]
@@ -400,6 +403,7 @@ class Runner:
         Ks: Tensor,
         width: int,
         height: int,
+        rasterization_method: Literal["gs3d", "radegs"] = "gs3d",
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
         means = self.splats["means"]  # [N, 3]
@@ -423,28 +427,59 @@ class Runner:
             colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
-        render_colors, render_alphas, info = rasterization(
-            means=means,
-            quats=quats,
-            scales=scales,
-            opacities=opacities,
-            colors=colors,
-            viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
-            Ks=Ks,  # [C, 3, 3]
-            width=width,
-            height=height,
-            packed=self.cfg.packed,
-            absgrad=(
-                self.cfg.strategy.absgrad
-                if isinstance(self.cfg.strategy, DefaultStrategy)
-                else False
-            ),
-            sparse_grad=self.cfg.sparse_grad,
-            rasterize_mode=rasterize_mode,
-            distributed=self.world_size > 1,
-            **kwargs,
-        )
+        if rasterization_method == "gs3d":
+            render_colors, render_alphas, info = rasterization(
+                means=means,
+                quats=quats,
+                scales=scales,
+                opacities=opacities,
+                colors=colors,
+                viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
+                Ks=Ks,  # [C, 3, 3]
+                width=width,
+                height=height,
+                packed=self.cfg.packed,
+                absgrad=(
+                    self.cfg.strategy.absgrad
+                    if isinstance(self.cfg.strategy, DefaultStrategy)
+                    else False
+                ),
+                sparse_grad=self.cfg.sparse_grad,
+                rasterize_mode=rasterize_mode,
+                distributed=self.world_size > 1,
+                **kwargs,
+            )
+        elif rasterization_method == "radegs":
+            render_colors, render_alphas, render_depths, render_normals, info = rasterization_radegs(
+                means=means,
+                quats=quats,
+                scales=scales,
+                opacities=opacities,
+                colors=colors,
+                viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
+                Ks=Ks,  # [C, 3, 3]
+                width=width,
+                height=height,
+                packed=self.cfg.packed,
+                absgrad=(
+                    self.cfg.strategy.absgrad
+                    if isinstance(self.cfg.strategy, DefaultStrategy)
+                    else False
+                ),
+                sparse_grad=self.cfg.sparse_grad,
+                rasterize_mode=rasterize_mode,
+                distributed=self.world_size > 1,
+                **kwargs,
+            )
+            info['render_depths'] = render_depths
+            info['render_normals'] = render_normals
+            return render_colors, render_alphas, info
+
+        else:
+            raise ValueError(f"Unknown rasterization type: {rasterization_method}. Supported types are 'gs3d' and 'radegs'.")
+
         return render_colors, render_alphas, info
+
 
     def train(self):
         cfg = self.cfg
@@ -533,6 +568,7 @@ class Runner:
                 far_plane=cfg.far_plane,
                 image_ids=image_ids,
                 render_mode="RGB+ED" if cfg.depth_loss else "RGB",
+                rasterization_method=cfg.rasterization_method
             )
             if renders.shape[-1] == 4:
                 colors, depths = renders[..., 0:3], renders[..., 3:4]
@@ -745,7 +781,7 @@ class Runner:
 
             torch.cuda.synchronize()
             tic = time.time()
-            colors, _, _ = self.rasterize_splats(
+            colors, alphas, info = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
@@ -753,6 +789,7 @@ class Runner:
                 sh_degree=cfg.sh_degree,
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
+                rasterization_method=cfg.rasterization_method
             )  # [1, H, W, 3]
             torch.cuda.synchronize()
             ellipse_time += time.time() - tic
@@ -760,14 +797,33 @@ class Runner:
             colors = torch.clamp(colors, 0.0, 1.0)
             canvas_list = [pixels, colors]
 
+            print("EVALUATED")
+
             if world_rank == 0:
                 # write images
                 canvas = torch.cat(canvas_list, dim=2).squeeze(0).cpu().numpy()
                 canvas = (canvas * 255).astype(np.uint8)
+                print("Saving to",
+                f"{self.render_dir}/{stage}_step{step}_{i:04d}.png")
+
                 imageio.imwrite(
                     f"{self.render_dir}/{stage}_step{step}_{i:04d}.png",
                     canvas,
                 )
+
+                if self.cfg.rasterization_method == "radegs":
+                    render_depths = info['render_depths']
+                    render_normals = info['render_normals']
+                    render_depths = render_depths.squeeze(0).squeeze(0).cpu().numpy()
+                    render_normals = render_normals.squeeze(0).squeeze(0).cpu().numpy()
+                    tifffile.imwrite(
+                        f"{self.render_dir}/{stage}_step{step}_{i:04d}_depth.tiff",
+                        render_depths,
+                    )
+                    tifffile.imwrite(
+                        f"{self.render_dir}/{stage}_step{step}_{i:04d}_normals.tiff",
+                        render_normals,
+                    )
 
                 pixels = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
                 colors = colors.permute(0, 3, 1, 2)  # [1, 3, H, W]
@@ -851,6 +907,7 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 render_mode="RGB+ED",
+                rasterization_method=cfg.rasterization_method
             )  # [1, H, W, 4]
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [1, H, W, 3]
             depths = renders[..., 3:4]  # [1, H, W, 1]
@@ -906,6 +963,7 @@ class Runner:
             height=H,
             sh_degree=self.cfg.sh_degree,  # active all SH degrees
             radius_clip=3.0,  # skip GSs that have small image radius (in pixels)
+            rasterization_method=self.cfg.rasterization_method
         )  # [1, H, W, 3]
         return render_colors[0].cpu().numpy()
 

@@ -43,8 +43,10 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     S *__restrict__ render_colors, // [C, image_height, image_width, COLOR_DIM]
     S *__restrict__ render_alphas, // [C, image_height, image_width, 1]
     S *__restrict__ render_depths, // [C, image_height, image_width, 1]
+    S *__restrict__ render_mdepths, // [C, image_height, image_width, 1]
     S *__restrict__ render_normals, // [C, image_height, image_width, 3]
-    int32_t *__restrict__ last_ids // [C, image_height, image_width]
+    int32_t *__restrict__ last_ids, // [C, image_height, image_width]
+    int32_t *__restrict__ max_contrib_ids // [C, image_height, image_width]
 ) {
     const float kernel_size = 1.0f;
 
@@ -145,6 +147,7 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     float weight = 0;
 
     uint32_t last_contributor = 0;
+    uint32_t max_contributor = 0;
 
     for (uint32_t b = 0; b < num_batches; ++b) {
         // resync all threads before beginning next batch
@@ -221,6 +224,9 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
             weight += vis;
             T = next_T;
             last_contributor = contributor;
+
+            if (before_median)
+                max_contributor = contributor + batch_start;
         }
     }
 
@@ -263,14 +269,19 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
         {
                 render_depths[pix_id] = 0;
         }
+        render_mdepths[pix_id] = m_depth_out / ln;
 
         // index in bin of last gaussian in this pixel
         last_ids[pix_id] = static_cast<int32_t>(cur_idx);
+
+        // TODO: should add batch_start to max_contributor?
+        max_contrib_ids[pix_id] = static_cast<int32_t>(max_contributor);
     }
 }
 
 template <uint32_t CDIM>
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+call_kernel_with_dim(
     // Gaussian parameters
     const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
     const torch::Tensor &conics,    // [C, N, 3] or [nnz, 3]
@@ -278,9 +289,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const torch::Tensor &opacities, // [C, N]  or [nnz]
     const torch::Tensor &camera_planes,
     const torch::Tensor &ray_planes,
+    const torch::Tensor &normals,
     const torch::Tensor &ts,
     const torch::Tensor &K,
-    const torch::Tensor &normals,
     const at::optional<torch::Tensor> &backgrounds, // [C, channels]
     const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
     // image size
@@ -330,12 +341,19 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
         {C, image_height, image_width, 1},
         means2d.options().dtype(torch::kFloat32)
     );
+    torch::Tensor mdepths = torch::empty(
+            {C, image_height, image_width, 1},
+            means2d.options().dtype(torch::kFloat32)
+    );
     torch::Tensor render_normals = torch::empty(
         {C, image_height, image_width, 3},
         means2d.options().dtype(torch::kFloat32)
     );
     torch::Tensor last_ids = torch::empty(
         {C, image_height, image_width}, means2d.options().dtype(torch::kInt32)
+    );
+    torch::Tensor max_ids = torch::empty(
+            {C, image_height, image_width}, means2d.options().dtype(torch::kInt32)
     );
 
     at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
@@ -387,14 +405,16 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
             renders.data_ptr<float>(),
             alphas.data_ptr<float>(),
             depths.data_ptr<float>(),
+            mdepths.data_ptr<float>(),
             render_normals.data_ptr<float>(),
-            last_ids.data_ptr<int32_t>()
+            last_ids.data_ptr<int32_t>(),
+            max_ids.data_ptr<int32_t>()
         );
 
-    return std::make_tuple(renders, alphas, depths, render_normals, last_ids);
+    return std::make_tuple(renders, alphas, depths, mdepths, render_normals, last_ids, max_ids);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 rasterize_to_pixels_fwd_radegs_tensor(
     // Gaussian parameters
     const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
@@ -403,9 +423,9 @@ rasterize_to_pixels_fwd_radegs_tensor(
     const torch::Tensor &opacities, // [C, N]  or [nnz]
     const torch::Tensor &camera_planes,
     const torch::Tensor &ray_planes,
+    const torch::Tensor &normals,
     const torch::Tensor &ts,
     const torch::Tensor &K,
-    const torch::Tensor &normals,
     const at::optional<torch::Tensor> &backgrounds, // [C, channels]
     const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
     // image size
@@ -428,9 +448,9 @@ rasterize_to_pixels_fwd_radegs_tensor(
             opacities,                                                         \
             camera_planes,                                                     \
             ray_planes,                                                        \
+            normals,                                                           \
             ts,                                                                \
             K,                                                                 \
-            normals,                                                           \
             backgrounds,                                                       \
             masks,                                                             \
             image_width,                                                       \

@@ -12,8 +12,8 @@ set(GSPLAT_VERSION "0.1")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Define CUDA flags
-set(NVCC_FLAGS "-O3 --use_fast_math")
-#set(NVCC_FLAGS "-G -g -lineinfo")
+#set(NVCC_FLAGS "-O3 --use_fast_math")
+set(NVCC_FLAGS "-G -g -lineinfo")
 
 execute_process(
         COMMAND python -c "import sys; print(sys.executable)"

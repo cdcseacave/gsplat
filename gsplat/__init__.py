@@ -16,6 +16,7 @@ from .cuda._wrapper import (
     fully_fused_projection_2dgs,
     rasterize_to_pixels_2dgs,
     rasterize_to_indices_in_range_2dgs,
+    rasterize_to_pixels_radegs,
 )
 from .rendering import (
     rasterization,

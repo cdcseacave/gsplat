@@ -498,6 +498,7 @@ fully_fused_projection_fwd_radegs_tensor(
     const torch::Tensor &means,                // [N, 3]
     const at::optional<torch::Tensor> &quats,  // [N, 4] optional
     const at::optional<torch::Tensor> &scales, // [N, 3] optional
+    const torch::Tensor &opacities,             // [N, 1]
     const torch::Tensor &viewmats,             // [C, 4, 4]
     const torch::Tensor &Ks,                   // [C, 3, 3]
     const uint32_t image_width,
@@ -520,6 +521,7 @@ fully_fused_projection_fwd_radegs_tensor(
             const torch::Tensor &means,                // [N, 3]
             const at::optional<torch::Tensor> &quats,  // [N, 4] optional
             const at::optional<torch::Tensor> &scales, // [N, 3] optional
+            const torch::Tensor &opacities,                // [N, 1]
             const torch::Tensor &viewmats,             // [C, 4, 4]
             const torch::Tensor &Ks,                   // [C, 3, 3]
             const uint32_t image_width,
@@ -528,17 +530,21 @@ fully_fused_projection_fwd_radegs_tensor(
 //            const bool ortho,
             // fwd outputs
             const torch::Tensor &radii,                       // [C, N]
-            const torch::Tensor &conics,                      // [C, N, 3]
+            const torch::Tensor &conic_opacities,                      // [C, N, 4]
 //            const at::optional<torch::Tensor> &compensations, // [C, N] optional
             // grad outputs
             const torch::Tensor &v_means2d,                     // [C, N, 2]
             const torch::Tensor &v_depths,                      // [C, N]
             const torch::Tensor &v_conics,                      // [C, N, 3]
+            const torch::Tensor &v_camera_planes,               // [C, N, 6]
+            const torch::Tensor &v_ray_planes,                  // [C, N, 2]
+            const torch::Tensor &v_normals,                     // [C, N, 3]
+            const torch::Tensor &v_ts,                     // [C, N]
 //            const at::optional<torch::Tensor> &v_compensations, // [C, N] optional
             const bool viewmats_requires_grad
     );
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 rasterize_to_pixels_fwd_radegs_tensor(
     // Gaussian parameters
     const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
@@ -547,9 +553,9 @@ rasterize_to_pixels_fwd_radegs_tensor(
     const torch::Tensor &opacities, // [C, N]  or [nnz]
     const torch::Tensor &camera_planes,
     const torch::Tensor &ray_planes,
+    const torch::Tensor &normals,
     const torch::Tensor &ts,
     const torch::Tensor &K,
-    const torch::Tensor &normals,
     const at::optional<torch::Tensor> &backgrounds, // [C, channels]
     const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
     // image size
@@ -562,34 +568,49 @@ rasterize_to_pixels_fwd_radegs_tensor(
 );
 
 std::tuple<
-    torch::Tensor,
-    torch::Tensor,
-    torch::Tensor,
-    torch::Tensor,
-    torch::Tensor>
+        torch::Tensor,
+        torch::Tensor,
+        torch::Tensor,
+        torch::Tensor,
+        torch::Tensor,
+        torch::Tensor,
+        torch::Tensor,
+        torch::Tensor,
+        torch::Tensor>
 rasterize_to_pixels_bwd_radegs_tensor(
-    // Gaussian parameters
-    const torch::Tensor &means2d,                   // [C, N, 2] or [nnz, 2]
-    const torch::Tensor &conics,                    // [C, N, 3] or [nnz, 3]
-    const torch::Tensor &colors,                    // [C, N, 3] or [nnz, 3]
-    const torch::Tensor &opacities,                 // [C, N] or [nnz]
-    const at::optional<torch::Tensor> &backgrounds, // [C, 3]
-    const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
-    // image size
-    const uint32_t image_width,
-    const uint32_t image_height,
-    const uint32_t tile_size,
-    // intersections
-    const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
-    const torch::Tensor &flatten_ids,  // [n_isects]
-    // forward outputs
-    const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
-    const torch::Tensor &last_ids,      // [C, image_height, image_width]
-    // gradients of outputs
-    const torch::Tensor &v_render_colors, // [C, image_height, image_width, 3]
-    const torch::Tensor &v_render_alphas, // [C, image_height, image_width, 1]
-    // options
-    bool absgrad
+        // Gaussian parameters
+        const torch::Tensor &means2d,                   // [C, N, 2] or [nnz, 2]
+        const torch::Tensor &conics,                    // [C, N, 3] or [nnz, 3]
+        const torch::Tensor &colors,                    // [C, N, 3] or [nnz, 3]
+        const torch::Tensor &opacities,                 // [C, N] or [nnz]
+        const torch::Tensor &camera_planes,
+        const torch::Tensor &ray_planes,
+        const torch::Tensor &normals,
+        const torch::Tensor &ts,
+        const torch::Tensor &K,
+        const at::optional<torch::Tensor> &backgrounds, // [C, 3]
+        const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
+        // image size
+        const uint32_t image_width,
+        const uint32_t image_height,
+        const uint32_t tile_size,
+        // intersections
+        const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
+        const torch::Tensor &flatten_ids,  // [n_isects]
+        // forward outputs
+        const torch::Tensor &render_depths, // [C, image_height, image_width, 1]
+        const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
+        const torch::Tensor &render_normals, // [C, image_height, image_width, 3]
+        const torch::Tensor &last_ids,      // [C, image_height, image_width]
+        const torch::Tensor &max_ids,      // [C, image_height, image_width]
+        // gradients of outputs
+        const torch::Tensor &v_render_colors, // [C, image_height, image_width, 3]
+        const torch::Tensor &v_render_alphas, // [C, image_height, image_width, 1]
+        const torch::Tensor &v_render_depths, // [C, image_height, image_width, 1]
+        const torch::Tensor &v_render_mdepths, // [C, image_height, image_width, 1]
+        const torch::Tensor &v_render_normals, // [C, image_height, image_width, 3]
+        // options
+        bool absgrad
 );
 
 } // namespace gsplat

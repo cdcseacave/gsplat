@@ -4,11 +4,14 @@ import warnings
 import torch
 from torch import Tensor
 from torch.autograd import gradcheck
+import sys
 
 
 def _make_lazy_cuda_func(name: str) -> Callable:
     def call_cuda(*args, **kwargs):
         # pylint: disable=import-outside-toplevel
+        from gsplat import csrc as __C
+
         from ._backend import _C
 
         return getattr(_C, name)(*args, **kwargs)
@@ -2033,12 +2036,11 @@ def fully_fused_projection_radegs(
     else:
 
         test = _FullyFusedProjectionRade.apply
-
-        input = (means.double(),
-            quats.double(),
-            scales.double(),
-            viewmats,
-            Ks,
+        input = (means[:10].double(),
+            quats[:10].double(),
+            scales[:10].double(),
+            viewmats[:10].double(),
+            Ks[:10].double(),
             width,
             height,
             eps2d,
@@ -2048,9 +2050,26 @@ def fully_fused_projection_radegs(
             calc_compensations,
             ortho)
 
+        torch.save(means[:1000], "means.pt")
+        torch.save(quats[:1000], "quats.pt")
+        torch.save(scales[:1000], "scales.pt")
+        torch.save(viewmats[:1000], "viewmats.pt")
+        torch.save(Ks[:1000], "Ks.pt")
+        print("Viewmats size", viewmats.size())
+        print("width", width)
+        print("height", height)
+        print("eps2d", eps2d)
+        print("near_plane", near_plane)
+        print("far_plane", far_plane)
+        print("radius_clip", radius_clip)
+        print("calc_compensations", calc_compensations)
+        print("ortho", ortho)
+
+        sys.exit(0)
 
         gradcheck_result = gradcheck(test, input, eps=1e-6, atol=1e-4)
         print("GRADCHECK", gradcheck_result)
+        sys.exit(0)
 
         ret = _FullyFusedProjectionRade.apply(
             means,
@@ -2067,8 +2086,6 @@ def fully_fused_projection_radegs(
             calc_compensations,
             ortho
         )
-
-
 
         return ret
 
@@ -2126,10 +2143,16 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
         ctx.height = height
         ctx.eps2d = eps2d
 
+        print("FORWARD")
+        print("   ", radii.shape)
+        print("   ", means2d.shape)
+
         return radii, means2d, conics, depths, camera_plane, normals, ray_plane, ts
 
     @staticmethod
     def backward(ctx, v_radii, v_means2d, v_conics, v_depths, v_camera_plane, v_normals, v_ray_plane, v_ts):
+
+        print("BACKWARD")
         (
             means,
             quats,
@@ -2158,6 +2181,10 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
             v_means2d.contiguous(),
             v_depths.contiguous(),
             v_conics.contiguous(),
+            v_camera_plane.contiguous(),
+            v_normals.contiguous(),
+            v_ray_plane.contiguous(),
+            v_ts.contiguous(),
             ctx.needs_input_grad[3],  # viewmats_requires_grad
         )
 
@@ -2173,6 +2200,12 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
             v_scales = None
         if not ctx.needs_input_grad[3]:
             v_viewmats = None
+
+        print("Generated grads of sizes")
+        print("   ", v_means.shape)
+        print("   ", v_quats.shape)
+        print("   ", v_scales.shape)
+        print("   ", v_viewmats.shape if v_viewmats is not None else None)
 
         return (
             v_means,
@@ -2310,7 +2343,7 @@ def rasterize_to_pixels_radegs(
         tile_width * tile_size >= image_width
     ), f"Assert Failed: {tile_width} * {tile_size} >= {image_width}"
 
-    render_colors, render_alphas, render_depths, render_normals = _RasterizeToPixelsRADE.apply(
+    render_colors, render_alphas, render_depths, render_mdepths, render_normals = _RasterizeToPixelsRADE.apply(
         means2d.contiguous(),
         conics.contiguous(),
         colors.contiguous(),
@@ -2358,11 +2391,23 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
         isect_offsets: Tensor,  # [C, tile_height, tile_width]
         flatten_ids: Tensor,  # [n_isects]
         absgrad: bool,
-    ) -> Tuple[Tensor, Tensor]:
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
 
         print("RASTERIZE TO PIXELS RADE")
+        print("INPUTS")
+        print("   ", means2d.shape)
+        print("   ", conics.shape)
+        print("   ", colors.shape)
+        print("   ", opacities.shape)
+        print("   ", camera_planes.shape)
+        print("   ", ray_planes.shape)
+        print("   ", normals.shape)
+        print("   ", ts.shape)
+        print("   ", K.shape)
+        print("   ", backgrounds.shape if backgrounds is not None else None)
 
-        render_colors, render_alphas, render_depths, render_normals, last_ids = _make_lazy_cuda_func(
+
+        render_colors, render_alphas, render_depths, render_mdepths, render_normals, last_ids, max_ids = _make_lazy_cuda_func(
             "rasterize_to_pixels_fwd_radegs"
         )(
             means2d,
@@ -2385,7 +2430,6 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
 
         print("[DONE] RASTERIZE TO PIXELS RADE")
 
-
         ctx.save_for_backward(
             means2d,
             conics,
@@ -2395,8 +2439,16 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
             masks,
             isect_offsets,
             flatten_ids,
+            render_depths,
             render_alphas,
+            render_normals,
             last_ids,
+            max_ids,
+            camera_planes,
+            ray_planes,
+            normals,
+            ts,
+            K,
         )
         ctx.width = width
         ctx.height = height
@@ -2405,7 +2457,7 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
 
         # double to float
         render_alphas = render_alphas.float()
-        return render_colors, render_alphas, render_depths, render_normals
+        return render_colors, render_alphas, render_depths, render_mdepths, render_normals
 
     @staticmethod
     def backward(
@@ -2413,6 +2465,7 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
         v_render_colors: Tensor,  # [C, H, W, 3]
         v_render_alphas: Tensor,  # [C, H, W, 1]
         v_render_depths: Tensor,  # [C, H, W, 1]
+        v_render_mdepths: Tensor,  # [C, H, W, 1]
         v_render_normals: Tensor,  # [C, H, W, 3]
     ):
         (
@@ -2424,8 +2477,16 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
             masks,
             isect_offsets,
             flatten_ids,
+            render_depths,
             render_alphas,
+            render_normals,
             last_ids,
+            max_ids,
+            camera_planes,
+            ray_planes,
+            normals,
+            ts,
+            K,
         ) = ctx.saved_tensors
         width = ctx.width
         height = ctx.height
@@ -2440,11 +2501,20 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
             v_conics,
             v_colors,
             v_opacities,
+            v_camera_planes,
+            v_ray_planes,
+            v_normals,
+            v_ts
         ) = _make_lazy_cuda_func("rasterize_to_pixels_bwd_radegs")(
             means2d,
             conics,
             colors,
             opacities,
+            camera_planes,
+            ray_planes,
+            normals,
+            ts,
+            K,
             backgrounds,
             masks,
             width,
@@ -2452,10 +2522,16 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
             tile_size,
             isect_offsets,
             flatten_ids,
+            render_depths,
             render_alphas,
+            render_normals,
             last_ids,
+            max_ids,
             v_render_colors.contiguous(),
             v_render_alphas.contiguous(),
+            v_render_depths.contiguous(),
+            v_render_mdepths.contiguous(),
+            v_render_normals.contiguous(),
             absgrad,
         )
 
@@ -2469,15 +2545,27 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
         else:
             v_backgrounds = None
 
+        print("GRADS")
+        print("   ", v_means2d.shape)
+        print("   ", v_conics.shape)
+        print("   ", v_colors.shape)
+        print("   ", v_opacities.shape)
+        print("   ", v_camera_planes.shape)
+        print("   ", v_ray_planes.shape)
+        print("   ", v_normals.shape)
+        print("   ", v_ts.shape)
+        print("    NONE")
+        print("   ", v_backgrounds.shape if v_backgrounds is not None else None)
+
         return (
             v_means2d,
             v_conics,
             v_colors,
             v_opacities,
-            None,
-            None,
-            None,
-            None,
+            v_camera_planes,
+            v_ray_planes,
+            v_normals,
+            v_ts,
             None,
             v_backgrounds,
             None,

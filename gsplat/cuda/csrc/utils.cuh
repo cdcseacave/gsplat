@@ -6,6 +6,10 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/pca.hpp>
+
 #define FILTER_INV_SQUARE 2.0f
 
 namespace gsplat {
