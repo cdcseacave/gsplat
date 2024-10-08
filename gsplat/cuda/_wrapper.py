@@ -2368,8 +2368,8 @@ def rasterize_to_pixels_radegs(
         absgrad,
     )
 
-    if padded_channels > 0:
-        render_colors = render_colors[..., :-padded_channels]
+    # if padded_channels > 0:
+    #     render_colors = render_colors[..., :-padded_channels]
     return render_colors, render_alphas, render_depths, render_normals
 
 

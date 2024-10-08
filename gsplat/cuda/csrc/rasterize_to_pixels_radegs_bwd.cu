@@ -120,13 +120,13 @@ __global__ void rasterize_to_pixels_bwd_radegs_kernel(
         reinterpret_cast<vec3<float> *>(&xy_opacity_batch[block_size]
         );                                         // [block_size]
     S *rgbs_batch = (S *)&conic_batch[block_size]; // [block_size * COLOR_DIM]
-    vec2<S> *ray_planes_batch =
-        reinterpret_cast<vec2<float> *>(&rgbs_batch[block_size * COLOR_DIM]); // [block_size]
-    S *ts_batch = (S *)&ray_planes_batch[block_size]; // [block_size]
-    vec3<S> *normals_batch =
-        reinterpret_cast<vec3<float> *>(&ts_batch[block_size]); // [block_size]
-    vec2<S> *camera_planes_batch =
-        reinterpret_cast<vec2<float> *>(&normals_batch[block_size]); // [block_size * 3]
+//    vec2<S> *ray_planes_batch =
+//        reinterpret_cast<vec2<float> *>(&rgbs_batch[block_size * COLOR_DIM]); // [block_size]
+//    S *ts_batch = (S *)&ray_planes_batch[block_size]; // [block_size]
+//    vec3<S> *normals_batch =
+//        reinterpret_cast<vec3<float> *>(&ts_batch[block_size]); // [block_size]
+//    vec2<S> *camera_planes_batch =
+//        reinterpret_cast<vec2<float> *>(&normals_batch[block_size]); // [block_size * 3]
 
 
     // this is the T AFTER the last gaussian in this pixel
@@ -145,74 +145,74 @@ __global__ void rasterize_to_pixels_bwd_radegs_kernel(
     }
     const S v_render_a = v_render_alphas[pix_id];
 
-
-    const float ddelx_dx = 0.5 * image_width;
-    const float ddely_dy = 0.5 * image_height;
-
-
-    float accum_rec = { 0 };
-    float dL_dpixel;
-    vec3<S> accum_coord_rec{0, 0, 0};
-    vec3<S> dL_dpixel_coord{0, 0, 0};
-    float accum_t_rec = 0;
-    float accum_alpha_rec = 0;
-    vec3<S> accum_normal_rec{0, 0, 0};
-    vec3<S> dL_dpixel_mcoord;
-
-    float dL_dt;
-
-    float dL_dpixel_t = 0;
-    float dL_dpixel_mt = 0;
-    float dL_dalpha = 0;
-
-    const float w_final = inside ? render_alphas[pix_id] : 0;
-    const vec2<S> pixf = { (S)j, (S)i }; // TODO: check if order is correct
-    const vec2<S> pixnf = {(pixf.x-image_width/2.f)/(*K)[0][0],(pixf.y-image_height/2.f)/(*K)[1][1]};
-    const float ln = sqrt(pixnf.x*pixnf.x+pixnf.y*pixnf.y+1);
-    vec3<S> dL_dpixel_normal = {0.f, 0.f, 0.f};
-
-
-    float last_alpha = 0;
-    float last_color[COLOR_DIM] = { 0 };
-    float last_coord[3] = { 0 };
-    float last_t = 0;
-    float last_dL_dw = 0;
-    vec3<S> last_normal{0, 0, 0};
-
-
-    if (inside) {
-        dL_dalpha = v_render_alphas[pix_id];
-        float ww = w_final*w_final;
-
-        {
-           float dL_dpixel_depth_w = v_render_depths[pix_id];
-           float pixel_accum_depth = render_depths[pix_id] * render_alphas[pix_id];
-           dL_dalpha -= dL_dpixel_depth_w*pixel_accum_depth/ww;
-           dL_dpixel_t = dL_dpixel_depth_w / w_final / ln;
-           dL_dpixel_mt = v_render_mdepths[pix_id] / ln;
-        }
-
-        {
-            vec3<S> dL_dpixel_normaln;
-            dL_dpixel_normaln.x = v_render_normals[pix_id * 3];
-            dL_dpixel_normaln.y = v_render_normals[pix_id * 3 + 1];
-            dL_dpixel_normaln.z = v_render_normals[pix_id * 3 + 2];
-
-            glm::vec3 normaln = glm::vec3(render_normals[pix_id]);
-            S normal_len = glm::length(normaln);
-            glm::vec3 dL;
-            if (normal_len < NORMALIZE_EPS)
-                dL = dL_dpixel_normaln / NORMALIZE_EPS;
-            else
-                dL = (dL_dpixel_normaln - glm::dot(dL_dpixel_normaln, normaln) * normaln) / normal_len;
-
-            dL_dpixel_normal = dL;
-        }
-    }
-
-    uint32_t contributor = range_end - range_start;
-    const int last_contributor = inside ? last_ids[pix_id] : 0;
-    const int max_contributor = inside ? max_ids[pix_id] : 0;
+//
+//    const float ddelx_dx = 0.5 * image_width;
+//    const float ddely_dy = 0.5 * image_height;
+//
+//
+//    float accum_rec = { 0 };
+//    float dL_dpixel;
+//    vec3<S> accum_coord_rec{0, 0, 0};
+//    vec3<S> dL_dpixel_coord{0, 0, 0};
+//    float accum_t_rec = 0;
+//    float accum_alpha_rec = 0;
+//    vec3<S> accum_normal_rec{0, 0, 0};
+//    vec3<S> dL_dpixel_mcoord;
+//
+//    float dL_dt;
+//
+//    float dL_dpixel_t = 0;
+//    float dL_dpixel_mt = 0;
+//    float dL_dalpha = 0;
+//
+//    const float w_final = inside ? render_alphas[pix_id] : 0;
+//    const vec2<S> pixf = { (S)j, (S)i }; // TODO: check if order is correct
+//    const vec2<S> pixnf = {(pixf.x-image_width/2.f)/(*K)[0][0],(pixf.y-image_height/2.f)/(*K)[1][1]};
+//    const float ln = sqrt(pixnf.x*pixnf.x+pixnf.y*pixnf.y+1);
+//    vec3<S> dL_dpixel_normal = {0.f, 0.f, 0.f};
+//
+//
+//    float last_alpha = 0;
+//    float last_color[COLOR_DIM] = { 0 };
+//    float last_coord[3] = { 0 };
+//    float last_t = 0;
+//    float last_dL_dw = 0;
+//    vec3<S> last_normal{0, 0, 0};
+//
+//
+//    if (inside) {
+//        dL_dalpha = v_render_alphas[pix_id];
+//        float ww = w_final*w_final;
+//
+//        {
+//           float dL_dpixel_depth_w = v_render_depths[pix_id];
+//           float pixel_accum_depth = render_depths[pix_id] * render_alphas[pix_id];
+//           dL_dalpha -= dL_dpixel_depth_w*pixel_accum_depth/ww;
+//           dL_dpixel_t = dL_dpixel_depth_w / w_final / ln;
+//           dL_dpixel_mt = v_render_mdepths[pix_id] / ln;
+//        }
+//
+//        {
+//            vec3<S> dL_dpixel_normaln;
+//            dL_dpixel_normaln.x = v_render_normals[pix_id * 3];
+//            dL_dpixel_normaln.y = v_render_normals[pix_id * 3 + 1];
+//            dL_dpixel_normaln.z = v_render_normals[pix_id * 3 + 2];
+//
+//            glm::vec3 normaln = glm::vec3(render_normals[pix_id]);
+//            S normal_len = glm::length(normaln);
+//            glm::vec3 dL;
+//            if (normal_len < NORMALIZE_EPS)
+//                dL = dL_dpixel_normaln / NORMALIZE_EPS;
+//            else
+//                dL = (dL_dpixel_normaln - glm::dot(dL_dpixel_normaln, normaln) * normaln) / normal_len;
+//
+//            dL_dpixel_normal = dL;
+//        }
+//    }
+//
+//    uint32_t contributor = range_end - range_start;
+//    const int last_contributor = inside ? last_ids[pix_id] : 0;
+//    const int max_contributor = inside ? max_ids[pix_id] : 0;
 
     // collect and process batches of gaussians
     // each thread loads one gaussian at a time before rasterizing
@@ -243,9 +243,9 @@ __global__ void rasterize_to_pixels_bwd_radegs_kernel(
             for (uint32_t k = 0; k < COLOR_DIM; ++k) {
                 rgbs_batch[tr * COLOR_DIM + k] = colors[g * COLOR_DIM + k];
             }
-            ray_planes_batch[tr] = ray_planes[g];
-            ts_batch[tr] = ts[g];
-            normals_batch[tr] = normals[g];
+//            ray_planes_batch[tr] = ray_planes[g];
+//            ts_batch[tr] = ts[g];
+//            normals_batch[tr] = normals[g];
         }
         // wait for other threads to collect the gaussians in batch
         block.sync();
@@ -287,10 +287,10 @@ __global__ void rasterize_to_pixels_bwd_radegs_kernel(
             vec2<S> v_xy_local = {0.f, 0.f};
             vec2<S> v_xy_abs_local = {0.f, 0.f};
             S v_opacity_local = 0.f;
-            vec2<S> v_ray_plane_local = {0.f, 0.f};
-            vec3<S> v_normal_local = {0.f, 0.f, 0.f};
-            S v_ts_local = 0.f;
-            vec2<S> ray_plane;
+//            vec2<S> v_ray_plane_local = {0.f, 0.f};
+//            vec3<S> v_normal_local = {0.f, 0.f, 0.f};
+//            S v_ts_local = 0.f;
+//            vec2<S> ray_plane;
             // initialize everything to 0, only set if the lane is valid
             if (valid) {
                 // compute the current T for this gaussian
@@ -335,7 +335,7 @@ __global__ void rasterize_to_pixels_bwd_radegs_kernel(
                     if (v_means2d_abs != nullptr) {
                         v_xy_abs_local = {abs(v_xy_local.x), abs(v_xy_local.y)};
                     }
-                    v_opacity_local = v_alpha;
+                    v_opacity_local = vis * v_alpha;
                 }
 
                 GSPLAT_PRAGMA_UNROLL
@@ -343,32 +343,32 @@ __global__ void rasterize_to_pixels_bwd_radegs_kernel(
                     buffer[k] += rgbs_batch[t * COLOR_DIM + k] * fac;
                 }
 
-                { // Depth
-                    const float t_center = ts_batch[t];
-                    ray_plane = ray_planes_batch[t];
-                    float tt = t_center + (ray_plane.x * delta.x + ray_plane.y * delta.y);
-                    accum_t_rec = last_alpha * last_t + (1.f - last_alpha) * accum_t_rec;
-                    last_t = tt;
-                    v_opacity_local += (t - accum_t_rec) * dL_dpixel_t;
-                    dL_dt = fac * dL_dpixel_t;
-                    if (contributor == batch_end - max_contributor-1) {
-                        dL_dt += dL_dpixel_mt;
-                    }
-                }
+//                { // Depth
+//                    const float t_center = ts_batch[t];
+//                    ray_plane = ray_planes_batch[t];
+//                    float tt = t_center + (ray_plane.x * delta.x + ray_plane.y * delta.y);
+//                    accum_t_rec = last_alpha * last_t + (1.f - last_alpha) * accum_t_rec;
+//                    last_t = tt;
+//                    v_opacity_local += (t - accum_t_rec) * dL_dpixel_t;
+//                    dL_dt = fac * dL_dpixel_t;
+//                    if (contributor == batch_end - max_contributor-1) {
+//                        dL_dt += dL_dpixel_mt;
+//                    }
+//                }
 
-                { // Normal
-                    v_ts_local = dL_dt;
-                    v_ray_plane_local = {dL_dt * delta.x / (*K)[0][0], dL_dt * delta.y / (*K)[1][1]};
-
-                    vec3<S> normal = normals_batch[t];
-                    // Update last color (to be used in the next iteration)
-                    accum_normal_rec = last_alpha * last_normal + (1.f - last_alpha) * accum_normal_rec;
-                    last_normal = normal;
-                    vec3<S> normal_contrib = (normal - accum_normal_rec) * dL_dpixel_normal;
-                    v_opacity_local += normal_contrib.x + normal_contrib.y + normal_contrib.z;
-
-                    v_normal_local = fac * dL_dpixel_normal;
-                }
+//                { // Normal
+//                    v_ts_local = dL_dt;
+//                    v_ray_plane_local = {dL_dt * delta.x / (*K)[0][0], dL_dt * delta.y / (*K)[1][1]};
+//
+//                    vec3<S> normal = normals_batch[t];
+//                    // Update last color (to be used in the next iteration)
+//                    accum_normal_rec = last_alpha * last_normal + (1.f - last_alpha) * accum_normal_rec;
+//                    last_normal = normal;
+//                    vec3<S> normal_contrib = (normal - accum_normal_rec) * dL_dpixel_normal;
+//                    v_opacity_local += normal_contrib.x + normal_contrib.y + normal_contrib.z;
+//
+//                    v_normal_local = fac * dL_dpixel_normal;
+//                }
 
 
             }
@@ -402,18 +402,18 @@ __global__ void rasterize_to_pixels_bwd_radegs_kernel(
                     gpuAtomicAdd(v_xy_abs_ptr + 1, v_xy_abs_local.y);
                 }
 
-                gpuAtomicAdd(v_opacities + g, vis * v_opacity_local);
+                gpuAtomicAdd(v_opacities + g, v_opacity_local);
 
-                gpuAtomicAdd(v_ts + g, v_ts_local);
-
-                S *v_ray_planes_ptr = (S *)(v_ray_planes) + 2 * g;
-                gpuAtomicAdd(v_ray_planes_ptr, v_ray_plane_local.x);
-                gpuAtomicAdd(v_ray_planes_ptr+1, v_ray_plane_local.y);
-
-                S *v_normals_ptr = (S *)(v_normals) + 3 * g;
-                gpuAtomicAdd(v_normals_ptr, v_normal_local.x);
-                gpuAtomicAdd(v_normals_ptr + 1, v_normal_local.y);
-                gpuAtomicAdd(v_normals_ptr + 2, v_normal_local.z);
+//                gpuAtomicAdd(v_ts + g, v_ts_local);
+//
+//                S *v_ray_planes_ptr = (S *)(v_ray_planes) + 2 * g;
+//                gpuAtomicAdd(v_ray_planes_ptr, v_ray_plane_local.x);
+//                gpuAtomicAdd(v_ray_planes_ptr+1, v_ray_plane_local.y);
+//
+//                S *v_normals_ptr = (S *)(v_normals) + 3 * g;
+//                gpuAtomicAdd(v_normals_ptr, v_normal_local.x);
+//                gpuAtomicAdd(v_normals_ptr + 1, v_normal_local.y);
+//                gpuAtomicAdd(v_normals_ptr + 2, v_normal_local.z);
             }
         }
     }

@@ -188,7 +188,7 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
             const vec2<S> delta = {xy_opac.x - px, xy_opac.y - py};
             const S sigma = 0.5f * (conic.x * delta.x * delta.x +
                                     conic.z * delta.y * delta.y) +
-                            conic.y * delta.x * delta.y;
+                                    conic.y * delta.x * delta.y;
             S alpha = min(0.999f, opac * __expf(-sigma));
             if (sigma < 0.f || alpha < 1.f / 255.f) {
                 continue;
@@ -202,6 +202,7 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
 
             int32_t g = id_batch[t];
             const S vis = alpha * T;
+            //printf("alpha: %f, T: %f, vis: %f\n", alpha, T, vis);
             const S *c_ptr = colors + g * COLOR_DIM;
             GSPLAT_PRAGMA_UNROLL
             for (uint32_t k = 0; k < COLOR_DIM; ++k) {

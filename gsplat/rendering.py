@@ -1,6 +1,7 @@
 import math
 from typing import Dict, Optional, Tuple
 
+import cv2
 import torch
 import torch.distributed
 import torch.nn.functional as F
@@ -1919,6 +1920,7 @@ def rasterization_radegs(
         # The results are packed into shape [nnz, ...]. All elements are valid.
         camera_ids, gaussian_ids, radii, means2d, conic_opacities, depths, camera_planes, normals, ray_planes, ts = proj_results
         opacities = opacities[gaussian_ids]  # [nnz]
+        conics = conic_opacities[..., :3]  # [C, N, 3]
     else:
         # The results are with shape [C, N, ...]. Only the elements with radii > 0 are valid.
         radii, means2d, conic_opacities, depths, camera_planes, normals, ray_planes, ts = proj_results
@@ -2123,6 +2125,9 @@ def rasterization_radegs(
 
     assert(Ks.shape[0] == 1)
 
+    render_depths = None
+    render_normals = None
+
     # print("rank", world_rank, "Before rasterize_to_pixels")
     if colors.shape[-1] > channel_chunk:
         # slice into chunks
@@ -2161,7 +2166,7 @@ def rasterization_radegs(
         render_colors = torch.cat(render_colors, dim=-1)
         render_alphas = render_alphas[0]  # discard the rest
     else:
-        render_colors, render_alphas, render_depths, render_normals = rasterize_to_pixels_radegs(
+        render_colors_rade, render_alphas_rade, render_depths_rade, render_normals_rade = rasterize_to_pixels_radegs(
             means2d,
             conics,
             colors,
@@ -2180,6 +2185,23 @@ def rasterization_radegs(
             packed=packed,
             absgrad=absgrad,
         )
+        render_colors, render_alphas = rasterize_to_pixels(
+            means2d,
+            conics,
+            colors,
+            opacities,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+            backgrounds=backgrounds,
+            packed=packed,
+            absgrad=absgrad,
+        )
+
+        cv2.imwrite("render_colors.png", render_colors[0,:,:,:3].cpu().detach().numpy()*255)
+        cv2.imwrite("render_colors_rade.png", render_colors_rade[0,:,:,:3].cpu().detach().numpy()*255)
 
     if render_mode in ["ED", "RGB+ED"]:
         # normalize the accumulated depth to get the expected depth
