@@ -2166,7 +2166,7 @@ def rasterization_radegs(
         render_colors = torch.cat(render_colors, dim=-1)
         render_alphas = render_alphas[0]  # discard the rest
     else:
-        render_colors_rade, render_alphas_rade, render_depths_rade, render_normals_rade = rasterize_to_pixels_radegs(
+        render_colors, render_alphas, render_depths, render_normals = rasterize_to_pixels_radegs(
             means2d,
             conics,
             colors,
@@ -2185,7 +2185,7 @@ def rasterization_radegs(
             packed=packed,
             absgrad=absgrad,
         )
-        render_colors, render_alphas = rasterize_to_pixels(
+        render_colors_old, render_alphas_old = rasterize_to_pixels(
             means2d,
             conics,
             colors,
@@ -2201,7 +2201,14 @@ def rasterization_radegs(
         )
 
         cv2.imwrite("render_colors.png", render_colors[0,:,:,:3].cpu().detach().numpy()*255)
-        cv2.imwrite("render_colors_rade.png", render_colors_rade[0,:,:,:3].cpu().detach().numpy()*255)
+        cv2.imwrite("render_colors_old.png", render_colors_old[0,:,:,:3].cpu().detach().numpy()*255)
+
+        cv2.imwrite("render_alphas.png", render_alphas[0,:,:,:3].cpu().detach().numpy()*255)
+        cv2.imwrite("render_alphas_old.png", render_alphas_old[0,:,:,:3].cpu().detach().numpy()*255)
+        # cv2.imwrite("render_colors_rade.png", render_colors_rade[0,:,:,:3].cpu().detach().numpy()*255)
+
+        render_colors = render_colors_old
+        render_alphas = render_alphas_old
 
     if render_mode in ["ED", "RGB+ED"]:
         # normalize the accumulated depth to get the expected depth

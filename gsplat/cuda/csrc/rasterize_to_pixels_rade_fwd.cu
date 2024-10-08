@@ -242,9 +242,9 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
         render_alphas[pix_id] = 1.0f - T;
         GSPLAT_PRAGMA_UNROLL
         for (uint32_t k = 0; k < COLOR_DIM; ++k) {
-            render_colors[pix_id * COLOR_DIM + k] = pix_out[k];
-//                backgrounds == nullptr ? pix_out[k]
-//                                       : (pix_out[k] + T * backgrounds[k]);
+            render_colors[pix_id * COLOR_DIM + k] =
+                backgrounds == nullptr ? pix_out[k]
+                                       : (pix_out[k] + T * backgrounds[k]);
         }
 
         // normal
