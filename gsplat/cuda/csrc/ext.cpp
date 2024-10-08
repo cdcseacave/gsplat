@@ -1,6 +1,12 @@
 #include "bindings.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    py::enum_<gsplat::CameraModelType>(m, "CameraModelType")
+        .value("PINHOLE", gsplat::CameraModelType::PINHOLE)
+        .value("ORTHO", gsplat::CameraModelType::ORTHO)
+        .value("FISHEYE", gsplat::CameraModelType::FISHEYE)
+        .export_values();
+
     m.def("compute_sh_fwd", &gsplat::compute_sh_fwd_tensor);
     m.def("compute_sh_bwd", &gsplat::compute_sh_bwd_tensor);
 
@@ -81,4 +87,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "rasterize_to_indices_in_range_2dgs",
         &gsplat::rasterize_to_indices_in_range_2dgs_tensor
     );
+
+    m.def("selective_adam_update", &gsplat::selective_adam_update);
 }
