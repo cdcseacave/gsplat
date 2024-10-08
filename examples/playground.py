@@ -11,6 +11,22 @@ from gsplat.rendering import rasterization_rade_inria_wrapper
 torch.use_deterministic_algorithms(True)
 import sys
 
+def make_rotation_quat(angle):
+    # Define the angle in radians
+    angle = math.radians(angle)
+
+    # Calculate the quaternion components
+    qw = math.cos(angle / 2)
+    qx = 0.0
+    qy = math.sin(angle / 2)
+    qz = 0.0
+
+    # Create the quaternion tensor
+    quaternion = torch.tensor([[qw, qx, qy, qz]], dtype=torch.float32)
+
+    return quaternion
+
+
 class _FullyFusedProjectionRadePlayground(torch.autograd.Function):
     """Projects Gaussians to 2D."""
 
@@ -66,18 +82,12 @@ class _FullyFusedProjectionRadePlayground(torch.autograd.Function):
 
         means2d = torch.nan_to_num(means2d, nan=0.0, posinf=0.0, neginf=0.0)
         conics = torch.nan_to_num(conics, nan=0.0, posinf=0.0, neginf=0.0)
+        depths = torch.nan_to_num(depths, nan=0.0, posinf=0.0, neginf=0.0)
 
-        print("------------------------------------")
-        print("FORWARD IN")
-        print("Opacities", opacities)
-        print("FORWARD OUT")
-        print("Means2d", means2d)
-        print("Conics", conics)
-
-        return means2d, conics#, depths#, camera_plane#, normals, ray_plane, ts
+        return means2d, conics, depths, ts, normals, camera_plane, ray_plane
 
     @staticmethod
-    def backward(ctx, v_means2d, v_conics):#, v_depths):#, v_camera_plane): #, v_normals, v_ray_plane, v_ts):
+    def backward(ctx, v_means2d, v_conics, v_depths, v_ts, v_normals, v_camera_plane, v_ray_plane):
 
         #print("BACKWARD")
         (
@@ -102,9 +112,9 @@ class _FullyFusedProjectionRadePlayground(torch.autograd.Function):
 #        print("   ", v_means2d.shape)
 #        print("   ", v_conics.shape)
 #        print("   ", v_depths.shape)
-        print("Input grads")
-        print("   ", v_means2d)
-        print("   ", v_conics)
+#        print("Input grads")
+#        print("   ", v_means2d)
+#        print("   ", v_conics)
 
         width = ctx.width
         height = ctx.height
@@ -122,12 +132,12 @@ class _FullyFusedProjectionRadePlayground(torch.autograd.Function):
             radii,
             conics,
             v_means2d.contiguous(),
-            torch.zeros_like(depths), # v_depths.contiguous(),
+            v_depths.contiguous(),
             v_conics.contiguous(),
-            torch.zeros_like(camera_plane), # v_camera_plane.contiguous(),
-            torch.zeros_like(ray_plane),  # v_ray_plane.contiguous(),
-            torch.zeros_like(normals),  # v_normals.contiguous(),
-            torch.zeros_like(ts),  # v_ts.contiguous(),
+            v_camera_plane.contiguous(),
+            v_ray_plane.contiguous(),
+            v_normals.contiguous(),
+            v_ts.contiguous(),
             ctx.needs_input_grad[3],  # viewmats_requires_grad
         )
 
@@ -142,11 +152,11 @@ class _FullyFusedProjectionRadePlayground(torch.autograd.Function):
         if not ctx.needs_input_grad[3]:
             v_viewmats = None
 
-        print("Returning grads")
-        print("   ", v_means)
-        print("   ", v_quats)
-        print("   ", v_scales)
-        print("   ", v_viewmats)
+#        print("Returning grads")
+#        print("   ", v_means)
+#        print("   ", v_quats)
+#        print("   ", v_scales)
+#        print("   ", v_viewmats)
 
         # v_quats[0, 0] = 1234.0
 
@@ -167,38 +177,207 @@ class _FullyFusedProjectionRadePlayground(torch.autograd.Function):
         )
 
 
-class CustomFunction(Function):
-    @staticmethod
-    def forward(ctx, a, b):
-        # Save context for backward pass
-        ctx.save_for_backward(a, b)
-        # Perform the forward computation
-        return a + b
+class _RasterizeToPixelsRADEPlayground(torch.autograd.Function):
+    """Rasterize gaussians"""
 
     @staticmethod
-    def backward(ctx, grad_output):
-        # Retrieve saved tensors
-        a, b = ctx.saved_tensors
-        # Compute the gradient of the input
-        grad_a = grad_output
-        grad_b = grad_output
-        return grad_a, grad_b
+    def forward(
+        ctx,
+        means2d: Tensor,  # [C, N, 2]
+        conics: Tensor,  # [C, N, 3]
+        colors: Tensor,  # [C, N, D]
+        opacities: Tensor,  # [C, N]
+        camera_planes: Tensor,
+        ray_planes: Tensor,
+        normals: Tensor,  # [C, N, 3]
+        ts: Tensor,  # [C, N]
+        K: Tensor, # [3, 3]
+        backgrounds: Tensor,  # [C, D], Optional
+        masks: Tensor,  # [C, tile_height, tile_width], Optional
+        width: int,
+        height: int,
+        tile_size: int,
+        isect_offsets: Tensor,  # [C, tile_height, tile_width]
+        flatten_ids: Tensor,  # [n_isects]
+        absgrad: bool,
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+
+        print("RASTERIZE TO PIXELS RADE")
+        print("INPUTS")
+        print("   ", means2d.shape)
+        print("   ", conics.shape)
+        print("   ", colors.shape)
+        print("   ", opacities.shape)
+        print("   ", camera_planes.shape)
+        print("   ", ray_planes.shape)
+        print("   ", normals.shape)
+        print("   ", ts.shape)
+        print("   ", K.shape)
+        print("   ", backgrounds.shape if backgrounds is not None else None)
 
 
-def make_rotation_quat(angle):
-    # Define the angle in radians
-    angle = math.radians(angle)
+        render_colors, render_alphas, render_depths, render_mdepths, render_normals, last_ids, max_ids = _make_lazy_cuda_func(
+            "rasterize_to_pixels_fwd_radegs"
+        )(
+            means2d,
+            conics,
+            colors,
+            opacities,
+            camera_planes,
+            ray_planes,
+            normals,
+            ts,
+            K,
+            backgrounds,
+            masks,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+        )
 
-    # Calculate the quaternion components
-    qw = math.cos(angle / 2)
-    qx = 0.0
-    qy = math.sin(angle / 2)
-    qz = 0.0
+        print("[DONE] RASTERIZE TO PIXELS RADE")
 
-    # Create the quaternion tensor
-    quaternion = torch.tensor([[qw, qx, qy, qz]], dtype=torch.float32)
+        ctx.save_for_backward(
+            means2d,
+            conics,
+            colors,
+            opacities,
+            backgrounds,
+            masks,
+            isect_offsets,
+            flatten_ids,
+            render_depths,
+            render_alphas,
+            render_normals,
+            last_ids,
+            max_ids,
+            camera_planes,
+            ray_planes,
+            normals,
+            ts,
+            K,
+        )
+        ctx.width = width
+        ctx.height = height
+        ctx.tile_size = tile_size
+        ctx.absgrad = absgrad
 
-    return quaternion
+        # double to float
+        render_alphas = render_alphas.float()
+        return render_colors, render_alphas, render_depths, render_mdepths, render_normals
+
+
+    @staticmethod
+    def backward(
+        ctx,
+        v_render_colors: Tensor,  # [C, H, W, 3]
+        v_render_alphas: Tensor,  # [C, H, W, 1]
+        v_render_depths: Tensor,  # [C, H, W, 1]
+        v_render_mdepths: Tensor,  # [C, H, W, 1]
+        v_render_normals: Tensor,  # [C, H, W, 3]
+    ):
+        (
+            means2d,
+            conics,
+            colors,
+            opacities,
+            backgrounds,
+            masks,
+            isect_offsets,
+            flatten_ids,
+            render_depths,
+            render_alphas,
+            render_normals,
+            last_ids,
+            max_ids,
+            camera_planes,
+            ray_planes,
+            normals,
+            ts,
+            K,
+        ) = ctx.saved_tensors
+        width = ctx.width
+        height = ctx.height
+        tile_size = ctx.tile_size
+        absgrad = ctx.absgrad
+
+        print("CALLING BACKWARD RADE")
+
+        (
+            v_means2d_abs,
+            v_means2d,
+            v_conics,
+            v_colors,
+            v_opacities,
+            v_camera_planes,
+            v_ray_planes,
+            v_normals,
+            v_ts
+        ) = _make_lazy_cuda_func("rasterize_to_pixels_bwd_radegs")(
+            means2d,
+            conics,
+            colors,
+            opacities,
+            camera_planes,
+            ray_planes,
+            normals,
+            ts,
+            K,
+            backgrounds,
+            masks,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+            render_depths,
+            render_alphas,
+            render_normals,
+            last_ids,
+            max_ids,
+            v_render_colors.contiguous(),
+            v_render_alphas.contiguous(),
+            v_render_depths.contiguous(),
+            v_render_mdepths.contiguous(),
+            v_render_normals.contiguous(),
+            absgrad,
+        )
+
+        if absgrad:
+            means2d.absgrad = v_means2d_abs
+
+        if ctx.needs_input_grad[9]:
+            v_backgrounds = (v_render_colors * (1.0 - render_alphas).float()).sum(
+                dim=(1, 2)
+            )
+        else:
+            v_backgrounds = None
+
+        return (
+            v_means2d,
+            v_conics,
+            v_colors,
+            v_opacities,
+            v_camera_planes,
+            v_ray_planes,
+            v_normals,
+            v_ts,
+            None,
+            v_backgrounds,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+
+
+
+
 
 # Check if GPU is available and set the device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -223,11 +402,66 @@ width = 300
 height = 200
 
 
-
 render_colors = None
 render_alphas = None
 render_depths = None
 render_normals = None
+
+
+
+
+fully_fused_projection = _FullyFusedProjectionRadePlayground.apply
+rasterize_to_pixels = _RasterizeToPixelsRADEPlayground.apply
+
+# Forward pass
+means2d, conics, depths, ts, normals, camera_planes, ray_planes = fully_fused_projection(means, quats, scales, viewmats, opacities, Ks, width, height)
+
+ret = rasterize_to_pixels(
+        means2d,
+        conics[:,:,:3],
+        colors,
+        conics[:,:,3],
+        camera_planes,
+        ray_planes,
+        normals,
+        ts,
+        Ks
+        backgrounds = None,
+        masks = None,  # [C, tile_height, tile_width], Optional
+        width,
+        height,
+        tile_size: int,
+        isect_offsets: Tensor,  # [C, tile_height, tile_width]
+        flatten_ids: Tensor,  # [n_isects]
+        absgrad: bool,
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 double_means = means.double().requires_grad_()
 double_quats = quats.double()#.requires_grad_()
@@ -236,20 +470,33 @@ double_viewmats = viewmats.double()#.requires_grad_()
 double_opacities = torch.ones(means.shape[0], dtype=torch.float64).to(device=device)#.requires_grad_()
 double_Ks = Ks.double()#.requires_grad_()
 
-print(double_means.requires_grad)
-print(double_quats.requires_grad)
-print(double_scales.requires_grad)
-print(double_viewmats.requires_grad)
-print(double_Ks.requires_grad)
 
-test = CustomFunction.apply
-gradcheck_result = gradcheck(test, (double_means,double_means), eps=1e-6, atol=1e-4)
-print("GRADCHECK 1 (test)", gradcheck_result)
 
-if not gradcheck_result:
-    raise Exception("Gradcheck failed")
 
-sys.exit(1)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -267,8 +514,8 @@ outputs = test(*input)
 #    raise Exception("Gradcheck failed")
 
 
-n_start = 82
-n_end = 83
+n_start = 89
+n_end = 90
 
 #n_start = 0
 #n_end = 50
@@ -299,7 +546,6 @@ double_Ks = Ks.double()#.requires_grad_()
 input = (double_means, double_quats, double_scales, double_viewmats, double_opacities, double_Ks, width, height)
 
 outputs = test(*input)
-print(outputs)
 
 gradcheck_result = gradcheck(test, input, eps=1e-6, atol=1e-4)
 print("GRADCHECK", gradcheck_result)

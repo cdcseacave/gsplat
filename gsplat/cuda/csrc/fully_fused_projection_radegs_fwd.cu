@@ -12,6 +12,7 @@
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/pca.hpp>
+#include "auxiliary.h"
 
 namespace gsplat {
 
@@ -238,8 +239,7 @@ __global__ void fully_fused_projection_fwd_radegs_kernel(
 
     mat3<T> Vrk_eigen_vector;
     vec3<T> Vrk_eigen_value;
-    // TODO: use glm_modification
-    int D = glm::findEigenvaluesSymReal(Vrk,Vrk_eigen_value,Vrk_eigen_vector);
+    int D = glm_modification::findEigenvaluesSymReal(Vrk,Vrk_eigen_value,Vrk_eigen_vector);
 
     unsigned int min_id = Vrk_eigen_value[0]>Vrk_eigen_value[1]? (Vrk_eigen_value[1]>Vrk_eigen_value[2]?2:1):(Vrk_eigen_value[0]>Vrk_eigen_value[2]?2:0);
 

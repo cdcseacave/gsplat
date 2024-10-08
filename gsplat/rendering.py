@@ -1611,11 +1611,6 @@ def rasterization_rade_inria_wrapper(
     # normals_surf = normals_surf * (render_alphas).detach()
     # render_colors = torch.cat([render_colors, render_depth], dim=-1)
 
-    print("RENDER COLORS: ", render_colors.shape)
-    print("RENDER DEPTH: ", render_depth.shape)
-    print("NORMALS SURF: ", normals_surf.shape)
-    print("RENDER ALPHAS: ", render_alphas.shape)
-
     meta = {
         "normals_rend": render_normal,
         "normals_surf": normals_surf,
@@ -1645,7 +1640,7 @@ def rasterization_radegs(
     radius_clip: float = 0.0,
     eps2d: float = 0.3,
     sh_degree: Optional[int] = None,
-    packed: bool = True,
+    packed: bool = False,
     tile_size: int = 16,
     backgrounds: Optional[Tensor] = None,
     render_mode: Literal["RGB", "D", "ED", "RGB+D", "RGB+ED"] = "RGB",
@@ -1898,38 +1893,36 @@ def rasterization_radegs(
         # Silently change C from local #Cameras to global #Cameras.
         C = len(viewmats)
 
-    print("RUNNING RADE RASTERIZATION")
-
     # Project Gaussians to 2D. Directly pass in {quats, scales} is faster than precomputing covars.
     proj_results = fully_fused_projection_radegs(
         means,
         quats,
         scales,
+        opacities,
         viewmats,
         Ks,
         width,
         height,
-        eps2d=eps2d,
-        packed=packed,
-        near_plane=near_plane,
-        far_plane=far_plane,
-        radius_clip=radius_clip,
-        sparse_grad=sparse_grad,
-        calc_compensations=(rasterize_mode == "antialiased"),
-        ortho=ortho,
+        #eps2d=eps2d,
+        #packed=packed,
+        #near_plane=near_plane,
+        #far_plane=far_plane,
+        #radius_clip=radius_clip,
+        #sparse_grad=sparse_grad,
+        #calc_compensations=(rasterize_mode == "antialiased"),
+        #ortho=ortho,
     )
     # empty_img = torch.zeros(1, 572, 764, 3).to(device)
     # return empty_img, empty_img, empty_img, empty_img, meta
 
-    print("PROJ RESULTS")
-
     if packed:
         # The results are packed into shape [nnz, ...]. All elements are valid.
-        camera_ids, gaussian_ids, radii, means2d, conics, depths, camera_planes, normals, ray_planes, ts = proj_results
+        camera_ids, gaussian_ids, radii, means2d, conic_opacities, depths, camera_planes, normals, ray_planes, ts = proj_results
         opacities = opacities[gaussian_ids]  # [nnz]
     else:
         # The results are with shape [C, N, ...]. Only the elements with radii > 0 are valid.
-        radii, means2d, conics, depths, camera_planes, normals, ray_planes, ts = proj_results
+        radii, means2d, conic_opacities, depths, camera_planes, normals, ray_planes, ts = proj_results
+        conics = conic_opacities[..., :3]  # [C, N, 3]
         opacities = opacities.repeat(C, 1)  # [C, N]
         camera_ids, gaussian_ids = None, None
 
@@ -1943,7 +1936,7 @@ def rasterization_radegs(
             "radii": radii,
             "means2d": means2d,
             "depths": depths,
-            "conics": conics,
+            "conics": conic_opacities,
             "opacities": opacities,
             "camera_plane": camera_planes,
             "normals": normals,
@@ -2112,7 +2105,6 @@ def rasterization_radegs(
     # print("rank", world_rank, "Before isect_offset_encode")
     isect_offsets = isect_offset_encode(isect_ids, C, tile_width, tile_height)
 
-    print("DEPTH SHAPE: ", depths.shape)
     meta.update(
         {
             "tile_width": tile_width,
@@ -2188,12 +2180,6 @@ def rasterization_radegs(
             packed=packed,
             absgrad=absgrad,
         )
-        print("RASTERIZATION cuda DONE")
-        print("RENDER COLORS: ", render_colors.shape)
-        print("RENDER ALPHAS: ", render_alphas.shape)
-        print("RENDER DEPTHS: ", render_depths.shape)
-        print("RENDER NORMALS: ", render_normals.shape)
-        print("META: ", meta.keys())
 
     if render_mode in ["ED", "RGB+ED"]:
         # normalize the accumulated depth to get the expected depth
@@ -2204,17 +2190,6 @@ def rasterization_radegs(
             ],
             dim=-1,
         )
-
-    print("RENDER COLORS: ", render_colors.shape)
-    print("RENDER ALPHAS: ", render_alphas.shape)
-    print("META: ", meta.keys())
-    for k,v in meta.items():
-        if v is None:
-            print("     ", k, v)
-        elif isinstance(v, torch.Tensor):
-            print("     ", k, v.shape)
-        else:
-            print("     ", k, v)
 
     return render_colors, render_alphas, render_depths, render_normals, meta
 

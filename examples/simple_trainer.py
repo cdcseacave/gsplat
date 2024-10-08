@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Union
 
 import tifffile
+import cv2
 import imageio
 import nerfview
 import numpy as np
@@ -473,10 +474,17 @@ class Runner:
             )
             info['render_depths'] = render_depths
             info['render_normals'] = render_normals
+
+            print("Writing to ", f"{self.render_dir}/render_colors_{self.world_rank}.tiff")
+            tifffile.imsave(f"{self.render_dir}/render_colors_{self.world_rank}.tiff", render_colors[0].detach().cpu().numpy())
+            cv2.imwrite(f"{self.render_dir}/render_colors_{self.world_rank}.png", render_colors[0].detach().cpu().numpy())
+
             return render_colors, render_alphas, info
 
         else:
             raise ValueError(f"Unknown rasterization type: {rasterization_method}. Supported types are 'gs3d' and 'radegs'.")
+
+
 
         return render_colors, render_alphas, info
 

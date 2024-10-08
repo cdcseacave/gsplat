@@ -117,8 +117,6 @@ quat = quats[0]
 R = viewmats[0, :3, :3]
 scale = scales[0]
 
-quat.
-
 # Create input tensor
 input = (quat, R, scale)
 

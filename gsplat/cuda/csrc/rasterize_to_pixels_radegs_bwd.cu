@@ -465,8 +465,6 @@ call_kernel_with_dim(
     // options
     bool absgrad
 ) {
-    printf("Called rasterize_to_pixels kernel caller\n");
-
     GSPLAT_DEVICE_GUARD(means2d);
     GSPLAT_CHECK_INPUT(means2d);
     GSPLAT_CHECK_INPUT(conics);

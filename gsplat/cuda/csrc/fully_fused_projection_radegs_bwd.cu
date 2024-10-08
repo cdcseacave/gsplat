@@ -10,6 +10,8 @@
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/pca.hpp>
+#include "auxiliary.h"
+
 
 namespace gsplat {
 
@@ -31,7 +33,7 @@ namespace gsplat {
             const vec2<T> *v_camera_planes,
             const vec2<T> v_ray_plane,
             const vec3<T> v_normal,
-            const vec3<T> v_conic,
+            const vec4<T> v_conic,
             // grad outputs
             const mat2<T> v_cov2d,
             const vec2<T> v_mean2d,
@@ -126,6 +128,7 @@ namespace gsplat {
         auto& dL_dnormal = v_normal;
         auto& dL_dconic = v_conic;
         auto& dL_dopacity = v_opacity;
+        auto& dL_dcov = v_cov3d;
 
         int kernel_size = 1;
 
@@ -161,7 +164,7 @@ namespace gsplat {
 
         mat3<T> Vrk_eigen_vector;
         vec3<T> Vrk_eigen_value;
-        int D = glm::findEigenvaluesSymReal(Vrk,Vrk_eigen_value,Vrk_eigen_vector);
+        float D = glm::findEigenvaluesSymReal(Vrk,Vrk_eigen_value,Vrk_eigen_vector);
 
         unsigned int min_id = Vrk_eigen_value[0]>Vrk_eigen_value[1]? (Vrk_eigen_value[1]>Vrk_eigen_value[2]?2:1):(Vrk_eigen_value[0]>Vrk_eigen_value[2]?2:0);
 
@@ -208,20 +211,7 @@ namespace gsplat {
         vec3<T> normal_vector;
         vec3<T> dL_dnormal_lv;
 
-        mat3<T> dL_dnJ;
-        if(isnan(uvh_mn.x)||D==0)
-        {
-            dL_dVrk = mat3<T>(0,0,0,0,0,0,0,0,0);
-            dL_dnJ = mat3<T>(0,0,0,0,0,0,0,0,0);
-            plane = vec3<T>(0,0,0);
-            nl = 1;
-            l = 1;
-            dL_du = 0;
-            dL_dv = 0;
-            dL_dl = 0;
-        }
-        else
-        {
+        // go inside else
             T vb = glm::dot(uvh_m, uvh);
             T vbn = glm::dot(uvh_mn, uvh);
 
@@ -249,6 +239,7 @@ namespace gsplat {
             glm::vec2 camera_plane2 = {(t.x+plane[0]*t.z)/nl, (t.y+plane[1]*t.z)/nl};
 
             glm::vec2 ray_plane = {plane[0]*factor_normal, plane[1]*factor_normal};
+        
             ray_normal_vector = {-plane[0]*factor_normal, -plane[1]*factor_normal, -1};
 
             cam_normal_vector = nJ * ray_normal_vector;
@@ -257,6 +248,21 @@ namespace gsplat {
             dL_dnormal_lv = dL_dnormal/lv;
             vec3<T> dL_dcam_normal_vector = dL_dnormal_lv - normal_vector * glm::dot(normal_vector,dL_dnormal_lv);
             vec3<T> dL_dray_normal_vector = glm::transpose(nJ) * dL_dcam_normal_vector;
+
+        mat3<T> dL_dnJ;
+        if(isnan(uvh_mn.x)||D==0)
+        {
+            dL_dVrk = mat3<T>(0,0,0,0,0,0,0,0,0);
+            dL_dnJ = mat3<T>(0,0,0,0,0,0,0,0,0);
+            plane = vec3<T>(0,0,0);
+            nl = 1;
+            l = 1;
+            dL_du = 0;
+            dL_dv = 0;
+            dL_dl = 0;
+        }
+        else
+        {
             dL_dnJ = glm::outerProduct(dL_dcam_normal_vector,ray_normal_vector);
             dL_dl = (-plane[0] * dL_dray_normal_vector.x - plane[1] * dL_dray_normal_vector.y
                      + plane[0] * dL_dray_plane.x + plane[1] * dL_dray_plane.y) / nl;
@@ -308,9 +314,9 @@ namespace gsplat {
 //            printf("   dL_dnl: %f\n", dL_dnl);
 //            printf("   txtz, tytz: %f %f\n", txtz, tytz);
 //            printf("   dL_dnJ_inv: %f %f %f %f\n", dL_dnJ_inv[0][1], dL_dnJ_inv[1][0], dL_dnJ_inv[1][1], dL_dnJ_inv[2][0]);
-//            printf("   dL_camera_plane0: %f %f\n", dL_camera_plane0.x, dL_camera_plane0.y);
-//            printf("   dL_camera_plane1: %f %f\n", dL_camera_plane1.x, dL_camera_plane1.y);
-//            printf("   dL_camera_plane2: %f %f\n", dL_camera_plane2.x, dL_camera_plane2.y);
+////            printf("   dL_camera_plane0: %f %f\n", dL_camera_plane0.x, dL_camera_plane0.y);
+////            printf("   dL_camera_plane1: %f %f\n", dL_camera_plane1.x, dL_camera_plane1.y);
+////            printf("   dL_camera_plane2: %f %f\n", dL_camera_plane2.x, dL_camera_plane2.y);
 //            printf("    tx ty tz: %f %f %f\n", t.x, t.y, t.z);
 //            printf("    l: %f\n", l);
 //            printf("    nl: %f\n", nl);
@@ -321,8 +327,12 @@ namespace gsplat {
 //            printf("     dL_dcam_normal_vector %f %f %f\n", dL_dcam_normal_vector.x, dL_dcam_normal_vector.y, dL_dcam_normal_vector.z);
 //            printf("     dL_dnormal_lv %f %f %f\n", dL_dnormal_lv.x, dL_dnormal_lv.y, dL_dnormal_lv.z);
 //            printf("     normal_vector %f %f %f\n", normal_vector.x, normal_vector.y, normal_vector.z);
+//            printf("    dL_dnJ %f %f %f\n", dL_dnJ[0][0], dL_dnJ[0][1], dL_dnJ[0][2]);
+//            printf("           %f %f %f\n", dL_dnJ[1][0], dL_dnJ[1][1], dL_dnJ[1][2]);
+//            printf("           %f %f %f\n", dL_dnJ[2][0], dL_dnJ[2][1], dL_dnJ[2][2]);
+//            printf("     ray_normal_vector %f %f %f\n", ray_normal_vector.x, ray_normal_vector.y, ray_normal_vector.z);
 //
-
+//
             dL_du = dL_dnl * 2 * txtz
                     + dL_duvh.x
                     + (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-tytz) + 2 * dL_dnJ_inv[1][1] * txtz - dL_dnJ_inv[2][0]
@@ -334,14 +344,14 @@ namespace gsplat {
         }
 
         const T combined_opacity = conic_opacity[3];
-	const T opacity = combined_opacity / (coef + 1e-6);
-	const T dL_dcoef = dL_dopacity * opacity;
-	const T dL_dsqrtcoef = dL_dcoef * 0.5 * 1. / (coef + 1e-6);
-	const T dL_ddet0 = dL_dsqrtcoef / (det_1+1e-6);
-	const T dL_ddet1 = dL_dsqrtcoef * det_0 * (-1.f / (det_1 * det_1 + 1e-6));
-	const T dcoef_da = dL_ddet0 * cov2D[1][1] + dL_ddet1 * (cov2D[1][1] + kernel_size);
-	const T dcoef_db = dL_ddet0 * (-2. * cov2D[0][1]) + dL_ddet1 * (-2. * cov2D[0][1]);
-	const T dcoef_dc = dL_ddet0 * cov2D[0][0] + dL_ddet1 * (cov2D[0][0] + kernel_size);
+        const T opacity = combined_opacity / (coef + 1e-6);
+        const T dL_dcoef = dL_dopacity * opacity;
+        const T dL_dsqrtcoef = dL_dcoef * 0.5 * 1. / (coef + 1e-6);
+        const T dL_ddet0 = dL_dsqrtcoef / (det_1+1e-6);
+        const T dL_ddet1 = dL_dsqrtcoef * det_0 * (-1.f / (det_1 * det_1 + 1e-6));
+        const T dcoef_da = dL_ddet0 * cov2D[1][1] + dL_ddet1 * (cov2D[1][1] + kernel_size);
+        const T dcoef_db = dL_ddet0 * (-2. * cov2D[0][1]) + dL_ddet1 * (-2. * cov2D[0][1]);
+        const T dcoef_dc = dL_ddet0 * cov2D[0][0] + dL_ddet1 * (cov2D[0][0] + kernel_size);
         //TODO gradient is zero if det_0 or det_1 < 0
         // Use helper variables for 2D covariance entries. More compact.
         T a = cov2D[0][0] + kernel_size;
@@ -351,55 +361,64 @@ namespace gsplat {
         T denom = a * c - b * b;
         T dL_da = 0, dL_db = 0, dL_dc = 0;
 
-	float denom2inv = 1.0f / ((denom * denom) + 0.0000001f);
+        float denom2inv = 1.0f / ((denom * denom) + 0.0000001f);
 
-	if (denom2inv != 0)
-	{
-		// Gradients of loss w.r.t. entries of 2D covariance matrix,
-		// given gradients of loss w.r.t. conic matrix (inverse covariance matrix).
-		// e.g., dL / da = dL / d_conic_a * d_conic_a / d_a
-		dL_da = denom2inv * (-c * c * dL_dconic.x + 2 * b * c * dL_dconic.y + (denom - a * c) * dL_dconic.z);
-		dL_dc = denom2inv * (-a * a * dL_dconic.z + 2 * a * b * dL_dconic.y + (denom - a * c) * dL_dconic.x);
-		dL_db = denom2inv * 2 * (b * c * dL_dconic.x - (denom + 2 * b * b) * dL_dconic.y + a * b * dL_dconic.z);
+        if (denom2inv != 0)
+        {
+        	// Gradients of loss w.r.t. entries of 2D covariance matrix,
+        	// given gradients of loss w.r.t. conic matrix (inverse covariance matrix).
+        	// e.g., dL / da = dL / d_conic_a * d_conic_a / d_a
+        	dL_da = denom2inv * (-c * c * dL_dconic.x + 2 * b * c * dL_dconic.y + (denom - a * c) * dL_dconic.z);
+        	dL_dc = denom2inv * (-a * a * dL_dconic.z + 2 * a * b * dL_dconic.y + (denom - a * c) * dL_dconic.x);
+        	dL_db = denom2inv * 2 * (b * c * dL_dconic.x - (denom + 2 * b * b) * dL_dconic.y + a * b * dL_dconic.z);
 
-		if (det_0 <= 1e-6 || det_1 <= 1e-6){
-			dL_dopacity = 0;
-		} else {
-			// Gradiends of alpha respect to conv due to low pass filter
-			dL_da += dcoef_da;
-			dL_dc += dcoef_dc;
-			dL_db += dcoef_db;
+        	if (det_0 <= 1e-6 || det_1 <= 1e-6){
+        		dL_dopacity = 0;
+        	} else {
+        		// Gradiends of alpha respect to conv due to low pass filter
+        		dL_da += dcoef_da;
+        		dL_dc += dcoef_dc;
+        		dL_db += dcoef_db;
 
-			// update dL_dopacity
-			dL_dopacity = dL_dopacity * coef;
-		}
+        		// update dL_dopacity
+        		dL_dopacity = dL_dopacity * coef;
+        	}
 
-//		// Gradients of loss L w.r.t. each 3D covariance matrix (Vrk) entry, 
-//		// given gradients w.r.t. 2D covariance matrix (diagonal).
-//		// cov2D = transpose(T) * transpose(Vrk) * T;
-//		dL_dcov[6 * idx + 0] = (T[0][0] * T[0][0] * dL_da + T[0][0] * T[1][0] * dL_db + T[1][0] * T[1][0] * dL_dc);
-//		dL_dcov[6 * idx + 3] = (T[0][1] * T[0][1] * dL_da + T[0][1] * T[1][1] * dL_db + T[1][1] * T[1][1] * dL_dc);
-//		dL_dcov[6 * idx + 5] = (T[0][2] * T[0][2] * dL_da + T[0][2] * T[1][2] * dL_db + T[1][2] * T[1][2] * dL_dc);
+        	// Gradients of loss L w.r.t. each 3D covariance matrix (Vrk) entry, 
+        	// given gradients w.r.t. 2D covariance matrix (diagonal).
+        	// cov2D = transpose(T) * transpose(Vrk) * T;
+//		dL_dcov[0][0] = (TR[0][0] * TR[0][0] * dL_da + TR[0][0] * TR[1][0] * dL_db + TR[1][0] * TR[1][0] * dL_dc);
+//		dL_dcov[1][1] = (TR[0][1] * TR[0][1] * dL_da + TR[0][1] * TR[1][1] * dL_db + TR[1][1] * TR[1][1] * dL_dc);
+//		dL_dcov[2][2] = (TR[0][2] * TR[0][2] * dL_da + TR[0][2] * TR[1][2] * dL_db + TR[1][2] * TR[1][2] * dL_dc);
 //
-//		// Gradients of loss L w.r.t. each 3D covariance matrix (Vrk) entry, 
-//		// given gradients w.r.t. 2D covariance matrix (off-diagonal).
-//		// Off-diagonal elements appear twice --> double the gradient.
-//		// cov2D = transpose(T) * transpose(Vrk) * T;
-//		dL_dcov[6 * idx + 1] = 2 * T[0][0] * T[0][1] * dL_da + (T[0][0] * T[1][1] + T[0][1] * T[1][0]) * dL_db + 2 * T[1][0] * T[1][1] * dL_dc;
-//		dL_dcov[6 * idx + 2] = 2 * T[0][0] * T[0][2] * dL_da + (T[0][0] * T[1][2] + T[0][2] * T[1][0]) * dL_db + 2 * T[1][0] * T[1][2] * dL_dc;
-//		dL_dcov[6 * idx + 4] = 2 * T[0][2] * T[0][1] * dL_da + (T[0][1] * T[1][2] + T[0][2] * T[1][1]) * dL_db + 2 * T[1][1] * T[1][2] * dL_dc;
-	}
-	else
-	{
-//		for (int i = 0; i < 6; i++)
-//			dL_dcov[6 * idx + i] = 0;
-	}
-//	dL_dcov[6 * idx + 0] += dL_dVrk[0][0];
-//	dL_dcov[6 * idx + 3] += dL_dVrk[1][1];
-//	dL_dcov[6 * idx + 5] += dL_dVrk[2][2];
-//	dL_dcov[6 * idx + 1] += dL_dVrk[0][1] + dL_dVrk[1][0];
-//	dL_dcov[6 * idx + 2] += dL_dVrk[0][2] + dL_dVrk[2][0];
-//	dL_dcov[6 * idx + 4] += dL_dVrk[1][2] + dL_dVrk[2][1];
+//                // Gradients of loss L w.r.t. each 3D covariance matrix (Vrk) entry, 
+//                // given gradients w.r.t. 2D covariance matrix (off-diagonal).
+//                // Off-diagonal elements appear twice --> double the gradient.
+//                // cov2D = transpose(TR) * transpose(Vrk) * TR;
+//                dL_dcov[0][1] = 2 * TR[0][0] * TR[0][1] * dL_da + (TR[0][0] * TR[1][1] + TR[0][1] * TR[1][0]) * dL_db + 2 * TR[1][0] * TR[1][1] * dL_dc;
+//                dL_dcov[0][2] = 2 * TR[0][0] * TR[0][2] * dL_da + (TR[0][0] * TR[1][2] + TR[0][2] * TR[1][0]) * dL_db + 2 * TR[1][0] * TR[1][2] * dL_dc;
+//                dL_dcov[1][2] = 2 * TR[0][2] * TR[0][1] * dL_da + (TR[0][1] * TR[1][2] + TR[0][2] * TR[1][1]) * dL_db + 2 * TR[1][1] * TR[1][2] * dL_dc;
+//
+//                dL_dcov[1][0] = dL_dcov[0][1];
+//                dL_dcov[2][0] = dL_dcov[0][2];
+//                dL_dcov[2][1] = dL_dcov[1][2];
+        }
+        else
+        {
+        	for (int i = 0; i < 3; i++)
+                    for (int j = 0; j < 3; j++)
+        		dL_dcov[i][j] = 0;
+        }
+////        for (int i = 0; i < 3; i++)
+////            for (int j = 0; j < 3; j++)
+////                dL_dcov[i][j] += dL_dVrk[i][j];
+
+////	dL_dcov[0][0] += dL_dVrk[0][0];
+////	dL_dcov[1][1] += dL_dVrk[1][1];
+////	dL_dcov[2][2] += dL_dVrk[2][2];
+////	dL_dcov[1] += dL_dVrk[0][1] + dL_dVrk[1][0];
+////	dL_dcov[2] += dL_dVrk[0][2] + dL_dVrk[2][0];
+////	dL_dcov[4] += dL_dVrk[1][2] + dL_dVrk[2][1];
 
 
         // Gradients of loss w.r.t. upper 2x3 portion of intermediate matrix TR
@@ -434,15 +453,15 @@ namespace gsplat {
         // 		t.x/l, t.y/l, t.z/l);
         T l3 = l * l * l;
 
-//        printf("    det %f %f\n", det_0, det_1);
-//        printf("Outputting gradients\n");
-//        printf("     %f\n", x_grad_mul);
-//        printf("     %f\n", dL_du * tz);
-//        printf("     %f\n", dL_dv * tz);
-//        printf("     %f\n", dL_camera_plane0.x * plane[0]);
-//        printf("     %f\n", dL_camera_plane0.y * plane[1]);
-//        printf("     %f\n", dL_camera_plane2.x);
-//        printf("     %f\n", dL_dl*t.x/l);
+////        printf("    det %f %f\n", det_0, det_1);
+////        printf("Outputting gradients\n");
+////        printf("     %f\n", x_grad_mul);
+////        printf("     %f\n", dL_du * tz);
+////        printf("     %f\n", dL_dv * tz);
+////        printf("     %f\n", dL_camera_plane0.x * plane[0]);
+////        printf("     %f\n", dL_camera_plane0.y * plane[1]);
+////        printf("     %f\n", dL_camera_plane2.x);
+////        printf("     %f\n", dL_dl*t.x/l);
 
 
         T dL_dtx =
@@ -469,9 +488,43 @@ namespace gsplat {
                        + dL_dl*t.z/l
                      ;
 
-//        printf("    adding %f %f %f\n", dL_dtx, dL_dty, dL_dtz);
+////        printf("    adding %f %f %f\n", dL_dtx, dL_dty, dL_dtz);
 
-        v_mean3d += vec3<T>(dL_dtx, dL_dty, dL_dtz);
+        if (isnan(dL_dtx) || isnan(dL_dty) || isnan(dL_dtz)) {
+            dL_dtx = 0;
+            dL_dty = 0;
+            dL_dtz = 0;
+//            printf("NaN detected in gradients\n");
+//            printf("    dL_dtx %f\n", dL_dtx);
+//            printf("     dL_dtx  %f %f %f %f\n",
+//                           + dL_du * tz,
+//                           -dL_dnJ[0][2]*tz2 + dL_dnJ[2][0]*(1/l-t.x*t.x/l3) + dL_dnJ[2][1]*(-t.x*t.y/l3) + dL_dnJ[2][2]*(-t.x*t.z/l3), //this line is from normal,
+//                            +(dL_camera_plane0.x * plane[0] + dL_camera_plane0.y * plane[1] + dL_camera_plane2.x)/nl,
+//                            +dL_dl*t.x/l);
+//            printf("        dL_du %f\n", dL_du);
+//            printf("        tz %f\n", tz);
+//            printf("                 dL_du %f %f %f %f\n",
+//                         dL_dnl * 2 * txtz,
+//                         dL_duvh.x,
+//                         (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-tytz) + 2 * dL_dnJ_inv[1][1] * txtz - dL_dnJ_inv[2][0],
+//                         (dL_camera_plane0.y * t.y + dL_camera_plane1.x * t.y + dL_camera_plane1.y * (-2*t.x)) / nl);
+//            printf("        dL_dnl %f\n", dL_dnl);
+//            printf("        dL_dnl %f %f %f %f %f\n",
+//                             (-dL_camera_plane0.x * camera_plane0.x - dL_camera_plane0.y * camera_plane0.y,
+//                            -dL_camera_plane1.x * camera_plane1.x - dL_camera_plane1.y * camera_plane1.y,
+//                            -dL_camera_plane2.x * camera_plane2.x - dL_camera_plane2.y * camera_plane2.y,
+//                            -dL_dray_normal_vector[0] * ray_normal_vector.x - dL_dray_normal_vector[1] * ray_normal_vector.y,
+//                            -dL_dray_plane.x * ray_plane.x - dL_dray_plane.y * ray_plane.y) / nl);
+//            printf("         camera_plane0 %f %f\n", camera_plane0.x, camera_plane0.y);
+//            printf("         camera_plane1 %f %f\n", camera_plane1.x, camera_plane1.y);
+//            printf("         camera_plane2 %f %f\n", camera_plane2.x, camera_plane2.y);
+//            printf("        dL_dcamera_plane0 %f %f\n", dL_camera_plane0.x, dL_camera_plane0.y);
+//            printf("        dL_dcamera_plane1 %f %f\n", dL_camera_plane1.x, dL_camera_plane1.y);
+//            printf("        dL_dcamera_plane2 %f %f\n", dL_camera_plane2.x, dL_camera_plane2.y);
+//            printf("       prods %f %f\n", dL_camera_plane1.x * camera_plane1.x, dL_camera_plane1.y * camera_plane1.y);
+
+        }
+//        v_mean3d += vec3<T>(dL_dtx, dL_dty, dL_dtz);
     }
 
 
@@ -603,34 +656,19 @@ namespace gsplat {
                 reinterpret_cast<const vec2<T> *>(v_camera_planes),
                 glm::make_vec2(v_ray_planes),
                 glm::make_vec3(v_normals),
-                glm::make_vec3(v_conics),
+                glm::make_vec4(v_conics),
                 v_covar2d,
                 glm::make_vec2(v_means2d),
                 v_mean_c,
                 v_covar_c,
                 *v_opacities
         );
-//
-//        persp_proj_vjp<T>(
-//                mean_c,
-//                covar_c,
-//                fx,
-//                fy,
-//                cx,
-//                cy,
-//                image_width,
-//                image_height,
-//                v_covar2d,
-//                glm::make_vec2(v_means2d),
-//                v_mean_c,
-//                v_covar_c
-//        );
 
         // add contribution from v_depths
         v_mean_c.z += v_depths[0];
 
-//        T norm = sqrt(mean_c[0] * mean_c[0] + mean_c[1] * mean_c[1] + mean_c[2] * mean_c[2]);
-//        v_mean_c += v_ts[0] * mean_c / norm;
+        T norm = sqrt(mean_c[0] * mean_c[0] + mean_c[1] * mean_c[1] + mean_c[2] * mean_c[2]);
+        v_mean_c += v_ts[0] * mean_c / norm;
 
         // vjp: transform Gaussian covariance to camera space
         vec3<T> v_mean(0.f);
@@ -664,17 +702,15 @@ namespace gsplat {
         quat_scale_to_covar_vjp<T>(
                 quat, scale, rotmat, v_covar, v_quat, v_scale
         );
-//        v_quat[3] = 1234;
-//        v_quat[3] = conic_opacities[3] / opacities[0];
         warpSum(v_quat, warp_group_g);
         warpSum(v_scale, warp_group_g);
         if (warp_group_g.thread_rank() == 0) {
-            v_quats += gid * 4;
+            v_quats += gid * 3;
             v_scales += gid * 3;
             gpuAtomicAdd(v_quats, v_quat[0]);
             gpuAtomicAdd(v_quats + 1, v_quat[1]);
             gpuAtomicAdd(v_quats + 2, v_quat[2]);
-            gpuAtomicAdd(v_quats + 3, v_quat[3]);
+//            gpuAtomicAdd(v_quats + 3, v_quat[3]);
             gpuAtomicAdd(v_scales, v_scale[0]);
             gpuAtomicAdd(v_scales + 1, v_scale[1]);
             gpuAtomicAdd(v_scales + 2, v_scale[2]);

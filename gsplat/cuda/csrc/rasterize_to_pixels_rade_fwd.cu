@@ -241,9 +241,9 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
         render_alphas[pix_id] = 1.0f - T;
         GSPLAT_PRAGMA_UNROLL
         for (uint32_t k = 0; k < COLOR_DIM; ++k) {
-            render_colors[pix_id * COLOR_DIM + k] =
-                backgrounds == nullptr ? pix_out[k]
-                                       : (pix_out[k] + T * backgrounds[k]);
+            render_colors[pix_id * COLOR_DIM + k] = pix_out[k];
+//                backgrounds == nullptr ? pix_out[k]
+//                                       : (pix_out[k] + T * backgrounds[k]);
         }
 
         // normal
@@ -361,8 +361,6 @@ call_kernel_with_dim(
         tile_size * tile_size *
         (sizeof(int32_t) + sizeof(vec3<float>) + sizeof(vec3<float>)
          + sizeof(float) + sizeof(vec3<float>) + sizeof(vec2<float>));
-
-    printf("Allocated shared memory: %d\n", shared_mem);
 
     // TODO: an optimization can be done by passing the actual number of
     // channels into the kernel functions and avoid necessary global memory

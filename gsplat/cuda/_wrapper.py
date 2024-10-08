@@ -1959,6 +1959,7 @@ def fully_fused_projection_radegs(
     means: Tensor,  # [N, 3]
     quats: Tensor,  # [N, 4]
     scales: Tensor,
+    opacities: Tensor,
     viewmats: Tensor,
     Ks: Tensor,
     width: int,
@@ -2035,46 +2036,46 @@ def fully_fused_projection_radegs(
         return NotImplemented("RADEGS packed not implemented")
     else:
 
-        test = _FullyFusedProjectionRade.apply
-        input = (means[:10].double(),
-            quats[:10].double(),
-            scales[:10].double(),
-            viewmats[:10].double(),
-            Ks[:10].double(),
-            width,
-            height,
-            eps2d,
-            near_plane,
-            far_plane,
-            radius_clip,
-            calc_compensations,
-            ortho)
+#        test = _FullyFusedProjectionRade.apply
+#        input = (means[:10].double(),
+#            quats[:10].double(),
+#            scales[:10].double(),
+#            viewmats[:10].double(),
+#            Ks[:10].double(),
+#            width,
+#            height,
+#            eps2d,
+#            near_plane,
+#            far_plane,
+#            radius_clip,
+#            calc_compensations,
+#            ortho)
 
-        torch.save(means[:1000], "means.pt")
-        torch.save(quats[:1000], "quats.pt")
-        torch.save(scales[:1000], "scales.pt")
-        torch.save(viewmats[:1000], "viewmats.pt")
-        torch.save(Ks[:1000], "Ks.pt")
-        print("Viewmats size", viewmats.size())
-        print("width", width)
-        print("height", height)
-        print("eps2d", eps2d)
-        print("near_plane", near_plane)
-        print("far_plane", far_plane)
-        print("radius_clip", radius_clip)
-        print("calc_compensations", calc_compensations)
-        print("ortho", ortho)
+#        torch.save(means[:1000], "means.pt")
+#        torch.save(quats[:1000], "quats.pt")
+#        torch.save(scales[:1000], "scales.pt")
+#        torch.save(viewmats[:1000], "viewmats.pt")
+#        torch.save(Ks[:1000], "Ks.pt")
+#        print("Viewmats size", viewmats.size())
+#        print("width", width)
+#        print("height", height)
+#        print("eps2d", eps2d)
+#        print("near_plane", near_plane)
+#        print("far_plane", far_plane)
+#        print("radius_clip", radius_clip)
+#        print("calc_compensations", calc_compensations)
+#        print("ortho", ortho)
 
-        sys.exit(0)
-
-        gradcheck_result = gradcheck(test, input, eps=1e-6, atol=1e-4)
-        print("GRADCHECK", gradcheck_result)
-        sys.exit(0)
-
+#
+#        gradcheck_result = gradcheck(test, input, eps=1e-6, atol=1e-4)
+#        print("GRADCHECK", gradcheck_result)
+#        sys.exit(0)
+#
         ret = _FullyFusedProjectionRade.apply(
             means,
             quats,
             scales,
+            opacities,
             viewmats,
             Ks,
             width,
@@ -2087,7 +2088,18 @@ def fully_fused_projection_radegs(
             ortho
         )
 
-        return ret
+        (radii, means2d, conics, depths, camera_plane, normals, ray_plane, ts) = ret
+
+        means2d = torch.nan_to_num(means2d, nan=0.0, posinf=0.0, neginf=0.0)
+        conics = torch.nan_to_num(conics, nan=0.0, posinf=0.0, neginf=0.0)
+        depths = torch.nan_to_num(depths, nan=0.0, posinf=0.0, neginf=0.0)
+        camera_plane = torch.nan_to_num(camera_plane, nan=0.0, posinf=0.0, neginf=0.0)
+        normals = torch.nan_to_num(normals, nan=0.0, posinf=0.0, neginf=0.0)
+        ray_plane = torch.nan_to_num(ray_plane, nan=0.0, posinf=0.0, neginf=0.0)
+        ts = torch.nan_to_num(ts, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+        return radii, means2d, conics, depths, camera_plane, normals, ray_plane, ts
 
 
 class _FullyFusedProjectionRade(torch.autograd.Function):
@@ -2099,6 +2111,7 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
         means: Tensor,
         quats: Tensor,
         scales: Tensor,
+        opacities: Tensor,
         viewmats: Tensor,
         Ks: Tensor,
         width: int,
@@ -2118,6 +2131,7 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
             means,
             quats,
             scales,
+            opacities,
             viewmats,
             Ks,
             width,
@@ -2133,6 +2147,7 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
             means,
             quats,
             scales,
+            opacities,
             viewmats,
             Ks,
             radii,
@@ -2143,20 +2158,16 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
         ctx.height = height
         ctx.eps2d = eps2d
 
-        print("FORWARD")
-        print("   ", radii.shape)
-        print("   ", means2d.shape)
-
         return radii, means2d, conics, depths, camera_plane, normals, ray_plane, ts
 
     @staticmethod
     def backward(ctx, v_radii, v_means2d, v_conics, v_depths, v_camera_plane, v_normals, v_ray_plane, v_ts):
 
-        print("BACKWARD")
         (
             means,
             quats,
             scales,
+            opacities,
             viewmats,
             Ks,
             radii,
@@ -2172,6 +2183,7 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
             means,
             quats,
             scales,
+            opacities,
             viewmats,
             Ks,
             width,
@@ -2188,8 +2200,6 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
             ctx.needs_input_grad[3],  # viewmats_requires_grad
         )
 
-        print(len(grads))
-
         v_means, v_quats, v_scales, v_viewmats = grads
 
         if not ctx.needs_input_grad[0]:
@@ -2201,16 +2211,11 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
         if not ctx.needs_input_grad[3]:
             v_viewmats = None
 
-        print("Generated grads of sizes")
-        print("   ", v_means.shape)
-        print("   ", v_quats.shape)
-        print("   ", v_scales.shape)
-        print("   ", v_viewmats.shape if v_viewmats is not None else None)
-
         return (
             v_means,
             v_quats,
             v_scales,
+            None,
             v_viewmats,
             None,
             None,
@@ -2393,19 +2398,6 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
         absgrad: bool,
     ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
 
-        print("RASTERIZE TO PIXELS RADE")
-        print("INPUTS")
-        print("   ", means2d.shape)
-        print("   ", conics.shape)
-        print("   ", colors.shape)
-        print("   ", opacities.shape)
-        print("   ", camera_planes.shape)
-        print("   ", ray_planes.shape)
-        print("   ", normals.shape)
-        print("   ", ts.shape)
-        print("   ", K.shape)
-        print("   ", backgrounds.shape if backgrounds is not None else None)
-
 
         render_colors, render_alphas, render_depths, render_mdepths, render_normals, last_ids, max_ids = _make_lazy_cuda_func(
             "rasterize_to_pixels_fwd_radegs"
@@ -2427,8 +2419,6 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
             isect_offsets,
             flatten_ids,
         )
-
-        print("[DONE] RASTERIZE TO PIXELS RADE")
 
         ctx.save_for_backward(
             means2d,
@@ -2493,8 +2483,6 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
         tile_size = ctx.tile_size
         absgrad = ctx.absgrad
 
-        print("CALLING BACKWARD RADE")
-
         (
             v_means2d_abs,
             v_means2d,
@@ -2544,18 +2532,6 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
             )
         else:
             v_backgrounds = None
-
-        print("GRADS")
-        print("   ", v_means2d.shape)
-        print("   ", v_conics.shape)
-        print("   ", v_colors.shape)
-        print("   ", v_opacities.shape)
-        print("   ", v_camera_planes.shape)
-        print("   ", v_ray_planes.shape)
-        print("   ", v_normals.shape)
-        print("   ", v_ts.shape)
-        print("    NONE")
-        print("   ", v_backgrounds.shape if v_backgrounds is not None else None)
 
         return (
             v_means2d,
