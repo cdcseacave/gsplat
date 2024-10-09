@@ -27,9 +27,10 @@ from typing_extensions import Literal, assert_never
 from utils import AppearanceOptModule, CameraOptModule, knn, rgb_to_sh, set_random_seed
 from MvsUtils import saveDMAP, saveMVSInterface
 
+from gsplat.utils import depth_to_normal
 from gsplat.compression import PngCompression
 from gsplat.distributed import cli
-from gsplat.rendering import rasterization, rasterization_radegs
+from gsplat.rendering import rasterization, rasterization_radegs, rasterization_rade_inria_wrapper
 from gsplat.strategy import DefaultStrategy, MCMCStrategy
 
 
@@ -134,9 +135,16 @@ class Config:
     app_opt_reg: float = 1e-6
 
     # Enable depth loss. (experimental)
-    depth_loss: bool = True
+    depth_loss: bool = False #True
     # Weight for depth loss
     depth_lambda: float = 1e-2
+
+    # Enable normal consistency loss. (Currently for RaDe-GS only)
+    normal_loss: bool = True
+    # Weight for normal loss
+    normal_lambda: float = 5e-2
+    # Iteration to start normal consistency regulerization
+    normal_start_iter: int = 7_000
 
     # Dump information to tensorboard every this steps
     tb_every: int = 100
@@ -145,7 +153,7 @@ class Config:
 
     lpips_net: Literal["vgg", "alex"] = "alex"
 
-    rasterization_method: Literal["gs3d", "radegs"] = "gs3d"
+    rasterization_method: Literal["gs3d", "radegs", "radegs_inria"] = "radegs_inria" #"gs3d"
 
     def adjust_steps(self, factor: float):
         self.eval_steps = [int(i * factor) for i in self.eval_steps]
@@ -406,7 +414,7 @@ class Runner:
         Ks: Tensor,
         width: int,
         height: int,
-        rasterization_method: Literal["gs3d", "radegs"] = "gs3d",
+        rasterization_method: str = "gs3d",
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
         means = self.splats["means"]  # [N, 3]
@@ -476,8 +484,36 @@ class Runner:
             )
             info['render_depths'] = render_depths
             info['render_normals'] = render_normals
-            return render_colors, render_alphas, info
-
+        elif rasterization_method == "radegs_inria":
+            (render_colors, render_alphas), info = rasterization_rade_inria_wrapper(
+                means=means,
+                quats=quats,
+                scales=scales,
+                opacities=opacities,
+                colors=colors,
+                viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
+                Ks=Ks,
+                width=width,
+                height=height,
+                near_plane=0.01,
+                far_plane=100.0,
+                radius_clip=0.0,
+                eps2d=0.3,
+                sh_degree=None,
+                packed=False,
+                tile_size=16,
+                backgrounds=None,
+                render_mode="RGB",
+                sparse_grad=False,
+                absgrad=False,
+                rasterize_mode="classic",
+                channel_chunk=32,
+                distributed=False,
+                ortho=False,
+                covars=None,
+            )
+            info['render_depths'] = info["depth"]
+            info['render_normals'] = info["normals_rend"]
         else:
             raise ValueError(f"Unknown rasterization type: {rasterization_method}. Supported types are 'gs3d' and 'radegs'.")
 
@@ -615,6 +651,28 @@ class Runner:
                 disp_gt = 1.0 / depths_gt  # [1, M]
                 depthloss = F.l1_loss(disp, disp_gt) * self.scene_scale
                 loss += depthloss * cfg.depth_lambda
+
+            if cfg.normal_loss and cfg.rasterization_method == "radegs_inria":
+                if step > cfg.normal_start_iter:
+                    curr_normal_lambda = cfg.normal_lambda
+                else:
+                    curr_normal_lambda = 0.0
+                viewmats = torch.linalg.inv(camtoworlds)
+                if True:
+                    normals_from_depth = depth_to_normal(
+                        info['render_depths'], torch.linalg.inv(viewmats), Ks
+                    ).squeeze(0)
+                else:
+                    normals_from_depth = info['normals_from_depth']
+                # normal consistency loss
+                normals = info['render_normals'].squeeze(0)
+                # normals_from_depth *= alphas.squeeze(0).detach()
+                # if len(normals_from_depth.shape) == 4:
+                #     normals_from_depth = normals_from_depth.squeeze(0)
+                normals_from_depth = normals_from_depth.permute((2, 0, 1))
+                normal_error = (1 - (normals * normals_from_depth).sum(dim=0))[None]
+                normalloss = curr_normal_lambda * normal_error.mean()
+                loss += normalloss
 
             # regularizations
             if cfg.opacity_reg > 0.0:

@@ -1620,6 +1620,7 @@ def rasterization_rade_inria_wrapper(
         "normals_rend": render_normal,
         "normals_surf": normals_surf,
         "depth": render_depth,
+        "depth_median": render_depth_median,
         "means2d": means2D,
         "width": width,
         "height": height,
