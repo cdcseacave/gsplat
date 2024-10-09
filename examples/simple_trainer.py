@@ -25,6 +25,7 @@ from fused_ssim import fused_ssim
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from typing_extensions import Literal, assert_never
 from utils import AppearanceOptModule, CameraOptModule, knn, rgb_to_sh, set_random_seed
+from MvsUtils import saveDMAP, saveMVSInterface
 
 from gsplat.compression import PngCompression
 from gsplat.distributed import cli
@@ -268,6 +269,8 @@ class Runner:
         os.makedirs(self.stats_dir, exist_ok=True)
         self.render_dir = f"{cfg.result_dir}/renders"
         os.makedirs(self.render_dir, exist_ok=True)
+        self.mvs_dir = f"{cfg.result_dir}/mvs"
+        os.makedirs(self.mvs_dir, exist_ok=True)
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{cfg.result_dir}/tb")
@@ -743,6 +746,8 @@ class Runner:
             if step in [i - 1 for i in cfg.eval_steps]:
                 self.eval(step)
                 self.render_traj(step)
+                if step == max_steps - 1:
+                    self.export_depthmaps()
 
             # run compression
             if cfg.compression is not None and step in [i - 1 for i in cfg.eval_steps]:
@@ -856,6 +861,104 @@ class Runner:
             for k, v in stats.items():
                 self.writer.add_scalar(f"{stage}/{k}", v, step)
             self.writer.flush()
+
+    @torch.no_grad()
+    def export_depthmaps(self):
+        """Entry for depth-maps export."""
+        print("Running depth-maps export...")
+        cfg = self.cfg
+        device = self.device
+
+        dataset = torch.utils.data.ConcatDataset([self.valset, self.trainset])
+        valloader = torch.utils.data.DataLoader(
+            dataset, batch_size=1, shuffle=False, num_workers=1
+        )
+        indices = np.concatenate((self.valset.indices, self.trainset.indices), axis=0)
+        scene = {
+            'stream_version': 3,
+            'platforms': [],
+            'images': [],
+            'vertices': [],
+            'vertices_normal': [],
+            'vertices_color': [],
+            'lines': [],
+            'lines_normal': [],
+            'lines_color': [],
+            'transform': np.eye(4, dtype=np.float32).tolist()
+        }
+        ellipse_time = 0
+        for i, data in enumerate(valloader):
+            camtoworlds = data["camtoworld"].to(device)
+            Ks = data["K"].to(device)
+            height, width = data["image"].shape[1:3]
+
+            torch.cuda.synchronize()
+            tic = time.time()
+            renders, _, _ = self.rasterize_splats(
+                camtoworlds=camtoworlds,
+                Ks=Ks,
+                width=width,
+                height=height,
+                sh_degree=cfg.sh_degree,
+                near_plane=cfg.near_plane,
+                far_plane=cfg.far_plane,
+                render_mode="RGB+ED",
+            )  # [1, H, W, 3]
+            torch.cuda.synchronize()
+            ellipse_time += time.time() - tic
+
+            colors, depths = renders[..., 0:3], renders[..., 3:4]
+            colors = torch.clamp(colors, 0.0, 1.0)
+
+            # write DMAP
+            ID = indices[i]
+            worldtocam = np.linalg.inv(data["camtoworld"].cpu().numpy()[0, :, :])
+            image_name = os.path.join('images', os.path.basename(self.parser.image_paths[ID]))
+            dmap = {}
+            dmap['depth_map'] = depths.cpu().numpy()
+            dmap['file_name'] = image_name
+            dmap['reference_view_id'] = ID
+            dmap['neighbor_view_ids'] = []
+            dmap['image_width'] = width
+            dmap['image_height'] = height
+            dmap['depth_width'] = width
+            dmap['depth_height'] = height
+            dmap['depth_min'] = depths.min().cpu().numpy()
+            dmap['depth_max'] = depths.max().cpu().numpy()
+            dmap['K'] = data["K"].cpu().numpy()[0, :, :]
+            dmap['R'] = worldtocam[:3, :3]
+            dmap['C'] = worldtocam[:3, :3].T @ -worldtocam[:3, 3]
+            saveDMAP(dmap, f"{self.mvs_dir}/depth{ID:04d}.dmap")
+
+            # update scene
+            image = {}
+            image['name'] = image_name
+            image['platform_id'] = len(scene['platforms'])
+            image['camera_id'] = 0
+            image['pose_id'] = 0
+            image['id'] = ID
+            scene['images'].append(image)
+
+            camera = {}
+            camera['name'] = f'camera_{ID}'
+            camera['width'] = width
+            camera['height'] = height
+            camera['K'] = data["K"].cpu().numpy()[0, :, :].tolist()
+            camera['R'] = np.eye(3, dtype=np.float32).tolist()
+            camera['C'] = np.zeros(3, dtype=np.float32).tolist()
+            pose = {
+                'R': dmap['R'].tolist(),
+                'C': dmap['C'].tolist()
+            }
+            platform = {
+                'name': f'platform_{ID}',
+                'cameras': [camera],
+                'poses': [pose]
+            }
+            scene['platforms'].append(platform)
+
+        saveMVSInterface(scene, f"{self.mvs_dir}/scene.mvs")
+        ellipse_time /= len(valloader)
 
     @torch.no_grad()
     def render_traj(self, step: int):
@@ -987,6 +1090,7 @@ def main(local_rank: int, world_rank, world_size: int, cfg: Config):
         step = ckpts[0]["step"]
         runner.eval(step=step)
         runner.render_traj(step=step)
+        runner.export_depthmaps()
         if cfg.compression is not None:
             runner.run_compression(step=step)
     else:
