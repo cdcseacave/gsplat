@@ -63,8 +63,8 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     tile_offsets += camera_id * tile_height * tile_width;
     render_colors += camera_id * image_height * image_width * COLOR_DIM;
     render_alphas += camera_id * image_height * image_width;
-    render_depths += camera_id * image_height * image_width;
-    render_normals += camera_id * image_height * image_width * 3;
+//    render_depths += camera_id * image_height * image_width;
+//    render_normals += camera_id * image_height * image_width * 3;
     last_ids += camera_id * image_height * image_width;
 
     if (backgrounds != nullptr) {
@@ -78,14 +78,14 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     S py = (S)i + 0.5f;
     int32_t pix_id = i * image_width + j;
 
-    const S fx = K[0];
-    const S fy = K[4];
-    const S cx = K[2];
-    const S cy = K[5];
-
-    vec2<S> pixf = { (float)px, (float)py };
-    float2 pixnf = {(pixf.x-image_width/2.f)/fx,(pixf.y-image_height/2.f)/fy};
-    float ln = sqrt(pixnf.x*pixnf.x+pixnf.y*pixnf.y+1);
+//    const S fx = K[0];
+//    const S fy = K[4];
+//    const S cx = K[2];
+//    const S cy = K[5];
+//
+//    vec2<S> pixf = { (float)px, (float)py };
+//    float2 pixnf = {(pixf.x-image_width/2.f)/fx,(pixf.y-image_height/2.f)/fy};
+//    float ln = sqrt(pixnf.x*pixnf.x+pixnf.y*pixnf.y+1);
 
     // return if out of bounds
     // keep not rasterizing threads around for reading data
@@ -119,12 +119,13 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     vec3<S> *xy_opacity_batch =
         reinterpret_cast<vec3<float> *>(&id_batch[block_size]); // [block_size]
     vec3<S> *conic_batch =
-        reinterpret_cast<vec3<float> *>(&xy_opacity_batch[block_size]); // [block_size]
-    vec3<S> *normal_batch =
-        reinterpret_cast<vec3<float> *>(&conic_batch[block_size]); // [block_size]
-    float *ts_batch = reinterpret_cast<float *>(&normal_batch[block_size]); // [block_size]
-    vec2<S> *ray_plane_batch =
-        reinterpret_cast<vec2<float> *>(&ts_batch[block_size]); // [block_size]
+        reinterpret_cast<vec3<float> *>(&xy_opacity_batch[block_size]
+        ); // [block_size]
+//    vec3<S> *normal_batch =
+//        reinterpret_cast<vec3<float> *>(&conic_batch[block_size]); // [block_size]
+//    float *ts_batch = reinterpret_cast<float *>(&normal_batch[block_size]); // [block_size]
+//    vec2<S> *ray_plane_batch =
+//        reinterpret_cast<vec2<float> *>(&ts_batch[block_size]); // [block_size]
 
 
     // current visibility left to render
@@ -141,13 +142,13 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     uint32_t tr = block.thread_rank();
 
     S pix_out[COLOR_DIM] = {0.f};
-    vec3<S> normal_out = {0.f, 0.f, 0.f};
-    float depth_out = 0;
-    float m_depth_out = 0;
-    float weight = 0;
-
-    uint32_t last_contributor = 0;
-    uint32_t max_contributor = 0;
+//    vec3<S> normal_out = {0.f, 0.f, 0.f};
+//    float depth_out = 0;
+//    float m_depth_out = 0;
+//    float weight = 0;
+//
+//    uint32_t last_contributor = 0;
+//    uint32_t max_contributor = 0;
 
     for (uint32_t b = 0; b < num_batches; ++b) {
         // resync all threads before beginning next batch
@@ -167,20 +168,20 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
             const S opac = opacities[g];
             xy_opacity_batch[tr] = {xy.x, xy.y, opac};
             conic_batch[tr] = conics[g];
-            normal_batch[tr] = normals[g];
-            ts_batch[tr] = ts[g];
-            ray_plane_batch[tr] = ray_planes[g];
+//            normal_batch[tr] = normals[g];
+//            ts_batch[tr] = ts[g];
+//            ray_plane_batch[tr] = ray_planes[g];
         }
 
         // wait for other threads to collect the gaussians in batch
         block.sync();
 
-	    uint32_t contributor = 0;
+//	    uint32_t contributor = 0;
 
         // process gaussians in the current batch for this pixel
         uint32_t batch_size = min(block_size, range_end - batch_start);
         for (uint32_t t = 0; (t < batch_size) && !done; ++t) {
-            contributor++;
+//            contributor++;
 
             const vec3<S> conic = conic_batch[t];
             const vec3<S> xy_opac = xy_opacity_batch[t];
@@ -188,7 +189,7 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
             const vec2<S> delta = {xy_opac.x - px, xy_opac.y - py};
             const S sigma = 0.5f * (conic.x * delta.x * delta.x +
                                     conic.z * delta.y * delta.y) +
-                                    conic.y * delta.x * delta.y;
+                            conic.y * delta.x * delta.y;
             S alpha = min(0.999f, opac * __expf(-sigma));
             if (sigma < 0.f || alpha < 1.f / 255.f) {
                 continue;
@@ -209,25 +210,25 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
                 pix_out[k] += c_ptr[k] * vis;
             }
 
-            normal_out += normal_batch[t] * vis;
-
-            bool before_median = T > 0.5;
-
-            float t_center = ts_batch[t];
-            vec2<S> ray_plane = ray_plane_batch[t];
-            float depth_t = t_center + (ray_plane.x * delta.x + ray_plane.y * delta.y);
-
-            depth_out += depth_t * vis;
-            if (before_median) m_depth_out = depth_t;
+//            normal_out += normal_batch[t] * vis;
+//
+//            bool before_median = T > 0.5;
+//
+//            float t_center = ts_batch[t];
+//            vec2<S> ray_plane = ray_plane_batch[t];
+//            float depth_t = t_center + (ray_plane.x * delta.x + ray_plane.y * delta.y);
+//
+//            depth_out += depth_t * vis;
+//            if (before_median) m_depth_out = depth_t;
 
             cur_idx = batch_start + t;
 
-            weight += vis;
+//            weight += vis;
             T = next_T;
-            last_contributor = contributor;
-
-            if (before_median)
-                max_contributor = contributor + batch_start;
+//            last_contributor = contributor;
+//
+//            if (before_median)
+//                max_contributor = contributor + batch_start;
         }
     }
 
@@ -247,36 +248,36 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
                                        : (pix_out[k] + T * backgrounds[k]);
         }
 
-        // normal
-        if (last_contributor) {
-            float len_normal = sqrt(normal_out.x * normal_out.x + normal_out.y * normal_out.y + normal_out.z * normal_out.z);
-            GSPLAT_PRAGMA_UNROLL
-            for (uint32_t k = 0; k < 3; ++k) {
-                render_normals[pix_id * 3 + k] = normal_out[k] / max(len_normal, NORMALIZE_EPS) / weight;
-            }
-        } else {
-            GSPLAT_PRAGMA_UNROLL
-            for (uint32_t k = 0; k < 3; ++k) {
-                render_normals[pix_id * 3 + k] = 0.0f;
-            }
-        }
-
-        // depth
-        if(last_contributor)
-        {
-                render_depths[pix_id] = depth_out / ln / weight;
-        }
-        else
-        {
-                render_depths[pix_id] = 0;
-        }
-        render_mdepths[pix_id] = m_depth_out / ln;
+//        // normal
+//        if (last_contributor) {
+//            float len_normal = sqrt(normal_out.x * normal_out.x + normal_out.y * normal_out.y + normal_out.z * normal_out.z);
+//            GSPLAT_PRAGMA_UNROLL
+//            for (uint32_t k = 0; k < 3; ++k) {
+//                render_normals[pix_id * 3 + k] = normal_out[k] / max(len_normal, NORMALIZE_EPS) / weight;
+//            }
+//        } else {
+//            GSPLAT_PRAGMA_UNROLL
+//            for (uint32_t k = 0; k < 3; ++k) {
+//                render_normals[pix_id * 3 + k] = 0.0f;
+//            }
+//        }
+//
+//        // depth
+//        if(last_contributor)
+//        {
+//                render_depths[pix_id] = depth_out / ln / weight;
+//        }
+//        else
+//        {
+//                render_depths[pix_id] = 0;
+//        }
+//        render_mdepths[pix_id] = m_depth_out / ln;
 
         // index in bin of last gaussian in this pixel
         last_ids[pix_id] = static_cast<int32_t>(cur_idx);
 
         // TODO: should add batch_start to max_contributor?
-        max_contrib_ids[pix_id] = static_cast<int32_t>(max_contributor);
+//        max_contrib_ids[pix_id] = static_cast<int32_t>(max_contributor);
     }
 }
 

@@ -1,4 +1,5 @@
 import math
+import sys
 from typing import Dict, Optional, Tuple
 
 import cv2
@@ -1653,6 +1654,21 @@ def rasterization_radegs(
     ortho: bool = False,
     covars: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Dict]:
+
+
+    # torch.save(means, "means.pt")
+    # torch.save(quats, "quats.pt")
+    # torch.save(scales, "scales.pt")
+    # torch.save(viewmats, "viewmats.pt")
+    # torch.save(Ks, "Ks.pt")
+    # torch.save(colors, "colors.pt")
+    # torch.save(opacities, "opacities.pt")
+    # print("WIDTH: ", width)
+    # print("HEIGHT: ", height)
+    # sys.exit(0)
+
+
+
     """Rasterize a set of 3D Gaussians (N) to a batch of image planes (C).
 
     This function provides a handful features for 3D Gaussian rasterization, which
@@ -1881,18 +1897,19 @@ def rasterization_radegs(
     # and the rasterize computation over cameras. So first we gather the cameras
     # from all ranks for projection.
     if distributed:
-        world_rank = torch.distributed.get_rank()
-        world_size = torch.distributed.get_world_size()
-
-        # Gather the number of Gaussians in each rank.
-        N_world = all_gather_int32(world_size, N, device=device)
-
-        # Enforce that the number of cameras is the same across all ranks.
-        C_world = [C] * world_size
-        viewmats, Ks = all_gather_tensor_list(world_size, [viewmats, Ks])
-
-        # Silently change C from local #Cameras to global #Cameras.
-        C = len(viewmats)
+        raise NotImplementedError("Distributed mode is not supported in RaDe-GS.")
+        # world_rank = torch.distributed.get_rank()
+        # world_size = torch.distributed.get_world_size()
+        #
+        # # Gather the number of Gaussians in each rank.
+        # N_world = all_gather_int32(world_size, N, device=device)
+        #
+        # # Enforce that the number of cameras is the same across all ranks.
+        # C_world = [C] * world_size
+        # viewmats, Ks = all_gather_tensor_list(world_size, [viewmats, Ks])
+        #
+        # # Silently change C from local #Cameras to global #Cameras.
+        # C = len(viewmats)
 
     # Project Gaussians to 2D. Directly pass in {quats, scales} is faster than precomputing covars.
     proj_results = fully_fused_projection_radegs(
@@ -1917,10 +1934,7 @@ def rasterization_radegs(
     # return empty_img, empty_img, empty_img, empty_img, meta
 
     if packed:
-        # The results are packed into shape [nnz, ...]. All elements are valid.
-        camera_ids, gaussian_ids, radii, means2d, conic_opacities, depths, camera_planes, normals, ray_planes, ts = proj_results
-        opacities = opacities[gaussian_ids]  # [nnz]
-        conics = conic_opacities[..., :3]  # [C, N, 3]
+        raise NotImplementedError("Packed mode is not supported in RaDe-GS.")
     else:
         # The results are with shape [C, N, ...]. Only the elements with radii > 0 are valid.
         radii, means2d, conic_opacities, depths, camera_planes, normals, ray_planes, ts = proj_results
@@ -1992,88 +2006,88 @@ def rasterization_radegs(
     # If in distributed mode, we need to scatter the GSs to the destination ranks, based
     # on which cameras they are visible to, which we already figured out in the projection
     # stage.
-    if distributed:
-        if packed:
-            # count how many elements need to be sent to each rank
-            cnts = torch.bincount(camera_ids, minlength=C)  # all cameras
-            cnts = cnts.split(C_world, dim=0)
-            cnts = [cuts.sum() for cuts in cnts]
-
-            # all to all communication across all ranks. After this step, each rank
-            # would have all the necessary GSs to render its own images.
-            collected_splits = all_to_all_int32(world_size, cnts, device=device)
-            (radii,) = all_to_all_tensor_list(
-                world_size, [radii], cnts, output_splits=collected_splits
-            )
-            (means2d, depths, conics, opacities, colors) = all_to_all_tensor_list(
-                world_size,
-                [means2d, depths, conics, opacities, colors],
-                cnts,
-                output_splits=collected_splits,
-            )
-
-            # before sending the data, we should turn the camera_ids from global to local.
-            # i.e. the camera_ids produced by the projection stage are over all cameras world-wide,
-            # so we need to turn them into camera_ids that are local to each rank.
-            offsets = torch.tensor(
-                [0] + C_world[:-1], device=camera_ids.device, dtype=camera_ids.dtype
-            )
-            offsets = torch.cumsum(offsets, dim=0)
-            offsets = offsets.repeat_interleave(torch.stack(cnts))
-            camera_ids = camera_ids - offsets
-
-            # and turn gaussian ids from local to global.
-            offsets = torch.tensor(
-                [0] + N_world[:-1],
-                device=gaussian_ids.device,
-                dtype=gaussian_ids.dtype,
-            )
-            offsets = torch.cumsum(offsets, dim=0)
-            offsets = offsets.repeat_interleave(torch.stack(cnts))
-            gaussian_ids = gaussian_ids + offsets
-
-            # all to all communication across all ranks.
-            (camera_ids, gaussian_ids) = all_to_all_tensor_list(
-                world_size,
-                [camera_ids, gaussian_ids],
-                cnts,
-                output_splits=collected_splits,
-            )
-
-            # Silently change C from global #Cameras to local #Cameras.
-            C = C_world[world_rank]
-
-        else:
-            # Silently change C from global #Cameras to local #Cameras.
-            C = C_world[world_rank]
-
-            # all to all communication across all ranks. After this step, each rank
-            # would have all the necessary GSs to render its own images.
-            (radii,) = all_to_all_tensor_list(
-                world_size,
-                [radii.flatten(0, 1)],
-                splits=[C_i * N for C_i in C_world],
-                output_splits=[C * N_i for N_i in N_world],
-            )
-            radii = reshape_view(C, radii, N_world)
-
-            (means2d, depths, conics, opacities, colors) = all_to_all_tensor_list(
-                world_size,
-                [
-                    means2d.flatten(0, 1),
-                    depths.flatten(0, 1),
-                    conics.flatten(0, 1),
-                    opacities.flatten(0, 1),
-                    colors.flatten(0, 1),
-                ],
-                splits=[C_i * N for C_i in C_world],
-                output_splits=[C * N_i for N_i in N_world],
-            )
-            means2d = reshape_view(C, means2d, N_world)
-            depths = reshape_view(C, depths, N_world)
-            conics = reshape_view(C, conics, N_world)
-            opacities = reshape_view(C, opacities, N_world)
-            colors = reshape_view(C, colors, N_world)
+    # if distributed:
+        # if packed:
+        #     # count how many elements need to be sent to each rank
+        #     cnts = torch.bincount(camera_ids, minlength=C)  # all cameras
+        #     cnts = cnts.split(C_world, dim=0)
+        #     cnts = [cuts.sum() for cuts in cnts]
+        #
+        #     # all to all communication across all ranks. After this step, each rank
+        #     # would have all the necessary GSs to render its own images.
+        #     collected_splits = all_to_all_int32(world_size, cnts, device=device)
+        #     (radii,) = all_to_all_tensor_list(
+        #         world_size, [radii], cnts, output_splits=collected_splits
+        #     )
+        #     (means2d, depths, conics, opacities, colors) = all_to_all_tensor_list(
+        #         world_size,
+        #         [means2d, depths, conics, opacities, colors],
+        #         cnts,
+        #         output_splits=collected_splits,
+        #     )
+        #
+        #     # before sending the data, we should turn the camera_ids from global to local.
+        #     # i.e. the camera_ids produced by the projection stage are over all cameras world-wide,
+        #     # so we need to turn them into camera_ids that are local to each rank.
+        #     offsets = torch.tensor(
+        #         [0] + C_world[:-1], device=camera_ids.device, dtype=camera_ids.dtype
+        #     )
+        #     offsets = torch.cumsum(offsets, dim=0)
+        #     offsets = offsets.repeat_interleave(torch.stack(cnts))
+        #     camera_ids = camera_ids - offsets
+        #
+        #     # and turn gaussian ids from local to global.
+        #     offsets = torch.tensor(
+        #         [0] + N_world[:-1],
+        #         device=gaussian_ids.device,
+        #         dtype=gaussian_ids.dtype,
+        #     )
+        #     offsets = torch.cumsum(offsets, dim=0)
+        #     offsets = offsets.repeat_interleave(torch.stack(cnts))
+        #     gaussian_ids = gaussian_ids + offsets
+        #
+        #     # all to all communication across all ranks.
+        #     (camera_ids, gaussian_ids) = all_to_all_tensor_list(
+        #         world_size,
+        #         [camera_ids, gaussian_ids],
+        #         cnts,
+        #         output_splits=collected_splits,
+        #     )
+        #
+        #     # Silently change C from global #Cameras to local #Cameras.
+        #     C = C_world[world_rank]
+        #
+        # else:
+        #     # Silently change C from global #Cameras to local #Cameras.
+        #     C = C_world[world_rank]
+        #
+        #     # all to all communication across all ranks. After this step, each rank
+        #     # would have all the necessary GSs to render its own images.
+        #     (radii,) = all_to_all_tensor_list(
+        #         world_size,
+        #         [radii.flatten(0, 1)],
+        #         splits=[C_i * N for C_i in C_world],
+        #         output_splits=[C * N_i for N_i in N_world],
+        #     )
+        #     radii = reshape_view(C, radii, N_world)
+        #
+        #     (means2d, depths, conics, opacities, colors) = all_to_all_tensor_list(
+        #         world_size,
+        #         [
+        #             means2d.flatten(0, 1),
+        #             depths.flatten(0, 1),
+        #             conics.flatten(0, 1),
+        #             opacities.flatten(0, 1),
+        #             colors.flatten(0, 1),
+        #         ],
+        #         splits=[C_i * N for C_i in C_world],
+        #         output_splits=[C * N_i for N_i in N_world],
+        #     )
+        #     means2d = reshape_view(C, means2d, N_world)
+        #     depths = reshape_view(C, depths, N_world)
+        #     conics = reshape_view(C, conics, N_world)
+        #     opacities = reshape_view(C, opacities, N_world)
+        #     colors = reshape_view(C, colors, N_world)
 
     # Rasterize to pixels
     if render_mode in ["RGB+D", "RGB+ED"]:
@@ -2207,8 +2221,8 @@ def rasterization_radegs(
         cv2.imwrite("render_alphas_old.png", render_alphas_old[0,:,:,:3].cpu().detach().numpy()*255)
         # cv2.imwrite("render_colors_rade.png", render_colors_rade[0,:,:,:3].cpu().detach().numpy()*255)
 
-        render_colors = render_colors_old
-        render_alphas = render_alphas_old
+        # render_colors = render_colors_old
+        # render_alphas = render_alphas_old
 
     if render_mode in ["ED", "RGB+ED"]:
         # normalize the accumulated depth to get the expected depth

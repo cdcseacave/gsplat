@@ -275,11 +275,14 @@ namespace gsplat {
             );
             vec3<T> dL_dplane_append = vec3<T>(dL_dplane.x, dL_dplane.y, 0);
 
-            dL_dnl = (-dL_camera_plane0.x * camera_plane0.x - dL_camera_plane0.y * camera_plane0.y
-                            -dL_camera_plane1.x * camera_plane1.x - dL_camera_plane1.y * camera_plane1.y
-                            -dL_camera_plane2.x * camera_plane2.x - dL_camera_plane2.y * camera_plane2.y
-                            -dL_dray_normal_vector[0] * ray_normal_vector.x - dL_dray_normal_vector[1] * ray_normal_vector.y
-                            -dL_dray_plane.x * ray_plane.x - dL_dray_plane.y * ray_plane.y) / nl;
+            dL_dnl = (0
+                    -dL_camera_plane0.x * camera_plane0.x - dL_camera_plane0.y * camera_plane0.y
+                    -dL_camera_plane1.x * camera_plane1.x - dL_camera_plane1.y * camera_plane1.y
+                    -dL_camera_plane2.x * camera_plane2.x - dL_camera_plane2.y * camera_plane2.y
+                    - dL_dray_normal_vector[0] * ray_normal_vector.x
+                    - dL_dray_normal_vector[1] * ray_normal_vector.y
+                    -dL_dray_plane.x * ray_plane.x - dL_dray_plane.y * ray_plane.y
+                    ) / nl;
 
 
             T tmp = dL_dplane.x * plane.x + dL_dplane.y * plane.y;
@@ -310,33 +313,14 @@ namespace gsplat {
 
             dL_dnJ_inv = glm::outerProduct(dL_dplane_append, uvh_m_vb);
 
-//            printf("Computing dL_du\n");
-//            printf("   dL_dnl: %f\n", dL_dnl);
-//            printf("   txtz, tytz: %f %f\n", txtz, tytz);
-//            printf("   dL_dnJ_inv: %f %f %f %f\n", dL_dnJ_inv[0][1], dL_dnJ_inv[1][0], dL_dnJ_inv[1][1], dL_dnJ_inv[2][0]);
-////            printf("   dL_camera_plane0: %f %f\n", dL_camera_plane0.x, dL_camera_plane0.y);
-////            printf("   dL_camera_plane1: %f %f\n", dL_camera_plane1.x, dL_camera_plane1.y);
-////            printf("   dL_camera_plane2: %f %f\n", dL_camera_plane2.x, dL_camera_plane2.y);
-//            printf("    tx ty tz: %f %f %f\n", t.x, t.y, t.z);
-//            printf("    l: %f\n", l);
-//            printf("    nl: %f\n", nl);
-//            printf("    dL_dplane_append %f %f %f\n", dL_dplane_append.x, dL_dplane_append.y, dL_dplane_append.z);
-//            printf("     uvh_m_vb %f %f %f\n", uvh_m_vb.x, uvh_m_vb.y, uvh_m_vb.z);
-//            printf("     dL_dray_plane %f %f\n", dL_dray_plane.x, dL_dray_plane.y);
-//            printf("     dL_dray_normal_vector %f %f %f\n", dL_dray_normal_vector.x, dL_dray_normal_vector.y, dL_dray_normal_vector.z);
-//            printf("     dL_dcam_normal_vector %f %f %f\n", dL_dcam_normal_vector.x, dL_dcam_normal_vector.y, dL_dcam_normal_vector.z);
-//            printf("     dL_dnormal_lv %f %f %f\n", dL_dnormal_lv.x, dL_dnormal_lv.y, dL_dnormal_lv.z);
-//            printf("     normal_vector %f %f %f\n", normal_vector.x, normal_vector.y, normal_vector.z);
-//            printf("    dL_dnJ %f %f %f\n", dL_dnJ[0][0], dL_dnJ[0][1], dL_dnJ[0][2]);
-//            printf("           %f %f %f\n", dL_dnJ[1][0], dL_dnJ[1][1], dL_dnJ[1][2]);
-//            printf("           %f %f %f\n", dL_dnJ[2][0], dL_dnJ[2][1], dL_dnJ[2][2]);
-//            printf("     ray_normal_vector %f %f %f\n", ray_normal_vector.x, ray_normal_vector.y, ray_normal_vector.z);
-//
-//
-            dL_du = dL_dnl * 2 * txtz
+            dL_du = 0
+                    + dL_dnl
+                    * 2 * txtz
                     + dL_duvh.x
                     + (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-tytz) + 2 * dL_dnJ_inv[1][1] * txtz - dL_dnJ_inv[2][0]
-                    + (dL_camera_plane0.y * t.y + dL_camera_plane1.x * t.y + dL_camera_plane1.y * (-2*t.x)) / nl;
+                    + (dL_camera_plane0.y * t.y + dL_camera_plane1.x * t.y + dL_camera_plane1.y * (-2*t.x)) / nl
+                    ;
+
             dL_dv = dL_dnl * 2 * tytz
                     + dL_duvh.y
                     + (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-txtz) + 2 * dL_dnJ_inv[0][0] * tytz - dL_dnJ_inv[2][1]
@@ -453,20 +437,10 @@ namespace gsplat {
         // 		t.x/l, t.y/l, t.z/l);
         T l3 = l * l * l;
 
-////        printf("    det %f %f\n", det_0, det_1);
-////        printf("Outputting gradients\n");
-////        printf("     %f\n", x_grad_mul);
-////        printf("     %f\n", dL_du * tz);
-////        printf("     %f\n", dL_dv * tz);
-////        printf("     %f\n", dL_camera_plane0.x * plane[0]);
-////        printf("     %f\n", dL_camera_plane0.y * plane[1]);
-////        printf("     %f\n", dL_camera_plane2.x);
-////        printf("     %f\n", dL_dl*t.x/l);
-
-
         T dL_dtx =
                 x_grad_mul * (/*-h_x * tz2 * dL_dJ02 +*/
-                           + dL_du * tz
+                0
+                        + dL_du  * tz
                            -dL_dnJ[0][2]*tz2 + dL_dnJ[2][0]*(1/l-t.x*t.x/l3) + dL_dnJ[2][1]*(-t.x*t.y/l3) + dL_dnJ[2][2]*(-t.x*t.z/l3) //this line is from normal
                             +(dL_camera_plane0.x * plane[0] + dL_camera_plane0.y * plane[1] + dL_camera_plane2.x)/nl
                             +dL_dl*t.x/l
@@ -490,41 +464,41 @@ namespace gsplat {
 
 ////        printf("    adding %f %f %f\n", dL_dtx, dL_dty, dL_dtz);
 
-        if (isnan(dL_dtx) || isnan(dL_dty) || isnan(dL_dtz)) {
-            dL_dtx = 0;
-            dL_dty = 0;
-            dL_dtz = 0;
-//            printf("NaN detected in gradients\n");
-//            printf("    dL_dtx %f\n", dL_dtx);
-//            printf("     dL_dtx  %f %f %f %f\n",
-//                           + dL_du * tz,
-//                           -dL_dnJ[0][2]*tz2 + dL_dnJ[2][0]*(1/l-t.x*t.x/l3) + dL_dnJ[2][1]*(-t.x*t.y/l3) + dL_dnJ[2][2]*(-t.x*t.z/l3), //this line is from normal,
-//                            +(dL_camera_plane0.x * plane[0] + dL_camera_plane0.y * plane[1] + dL_camera_plane2.x)/nl,
-//                            +dL_dl*t.x/l);
-//            printf("        dL_du %f\n", dL_du);
-//            printf("        tz %f\n", tz);
-//            printf("                 dL_du %f %f %f %f\n",
-//                         dL_dnl * 2 * txtz,
-//                         dL_duvh.x,
-//                         (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-tytz) + 2 * dL_dnJ_inv[1][1] * txtz - dL_dnJ_inv[2][0],
-//                         (dL_camera_plane0.y * t.y + dL_camera_plane1.x * t.y + dL_camera_plane1.y * (-2*t.x)) / nl);
-//            printf("        dL_dnl %f\n", dL_dnl);
-//            printf("        dL_dnl %f %f %f %f %f\n",
-//                             (-dL_camera_plane0.x * camera_plane0.x - dL_camera_plane0.y * camera_plane0.y,
-//                            -dL_camera_plane1.x * camera_plane1.x - dL_camera_plane1.y * camera_plane1.y,
-//                            -dL_camera_plane2.x * camera_plane2.x - dL_camera_plane2.y * camera_plane2.y,
-//                            -dL_dray_normal_vector[0] * ray_normal_vector.x - dL_dray_normal_vector[1] * ray_normal_vector.y,
-//                            -dL_dray_plane.x * ray_plane.x - dL_dray_plane.y * ray_plane.y) / nl);
-//            printf("         camera_plane0 %f %f\n", camera_plane0.x, camera_plane0.y);
-//            printf("         camera_plane1 %f %f\n", camera_plane1.x, camera_plane1.y);
-//            printf("         camera_plane2 %f %f\n", camera_plane2.x, camera_plane2.y);
-//            printf("        dL_dcamera_plane0 %f %f\n", dL_camera_plane0.x, dL_camera_plane0.y);
-//            printf("        dL_dcamera_plane1 %f %f\n", dL_camera_plane1.x, dL_camera_plane1.y);
-//            printf("        dL_dcamera_plane2 %f %f\n", dL_camera_plane2.x, dL_camera_plane2.y);
-//            printf("       prods %f %f\n", dL_camera_plane1.x * camera_plane1.x, dL_camera_plane1.y * camera_plane1.y);
-
-        }
-//        v_mean3d += vec3<T>(dL_dtx, dL_dty, dL_dtz);
+//        if (isnan(dL_dtx) || isnan(dL_dty) || isnan(dL_dtz)) {
+//            dL_dtx = 0;
+//            dL_dty = 0;
+//            dL_dtz = 0;
+////            printf("NaN detected in gradients\n");
+////            printf("    dL_dtx %f\n", dL_dtx);
+////            printf("     dL_dtx  %f %f %f %f\n",
+////                           + dL_du * tz,
+////                           -dL_dnJ[0][2]*tz2 + dL_dnJ[2][0]*(1/l-t.x*t.x/l3) + dL_dnJ[2][1]*(-t.x*t.y/l3) + dL_dnJ[2][2]*(-t.x*t.z/l3), //this line is from normal,
+////                            +(dL_camera_plane0.x * plane[0] + dL_camera_plane0.y * plane[1] + dL_camera_plane2.x)/nl,
+////                            +dL_dl*t.x/l);
+////            printf("        dL_du %f\n", dL_du);
+////            printf("        tz %f\n", tz);
+////            printf("                 dL_du %f %f %f %f\n",
+////                         dL_dnl * 2 * txtz,
+////                         dL_duvh.x,
+////                         (dL_dnJ_inv[0][1] + dL_dnJ_inv[1][0]) * (-tytz) + 2 * dL_dnJ_inv[1][1] * txtz - dL_dnJ_inv[2][0],
+////                         (dL_camera_plane0.y * t.y + dL_camera_plane1.x * t.y + dL_camera_plane1.y * (-2*t.x)) / nl);
+////            printf("        dL_dnl %f\n", dL_dnl);
+////            printf("        dL_dnl %f %f %f %f %f\n",
+////                             (-dL_camera_plane0.x * camera_plane0.x - dL_camera_plane0.y * camera_plane0.y,
+////                            -dL_camera_plane1.x * camera_plane1.x - dL_camera_plane1.y * camera_plane1.y,
+////                            -dL_camera_plane2.x * camera_plane2.x - dL_camera_plane2.y * camera_plane2.y,
+////                            -dL_dray_normal_vector[0] * ray_normal_vector.x - dL_dray_normal_vector[1] * ray_normal_vector.y,
+////                            -dL_dray_plane.x * ray_plane.x - dL_dray_plane.y * ray_plane.y) / nl);
+////            printf("         camera_plane0 %f %f\n", camera_plane0.x, camera_plane0.y);
+////            printf("         camera_plane1 %f %f\n", camera_plane1.x, camera_plane1.y);
+////            printf("         camera_plane2 %f %f\n", camera_plane2.x, camera_plane2.y);
+////            printf("        dL_dcamera_plane0 %f %f\n", dL_camera_plane0.x, dL_camera_plane0.y);
+////            printf("        dL_dcamera_plane1 %f %f\n", dL_camera_plane1.x, dL_camera_plane1.y);
+////            printf("        dL_dcamera_plane2 %f %f\n", dL_camera_plane2.x, dL_camera_plane2.y);
+////            printf("       prods %f %f\n", dL_camera_plane1.x * camera_plane1.x, dL_camera_plane1.y * camera_plane1.y);
+//
+//        }
+        v_mean3d += vec3<T>(dL_dtx, dL_dty, dL_dtz);
     }
 
 
@@ -538,7 +512,6 @@ namespace gsplat {
             const uint32_t C,
             const uint32_t N,
             const T *__restrict__ means,    // [N, 3]
-//            const T *__restrict__ covars,   // [N, 6] optional
             const T *__restrict__ quats,    // [N, 4] optional
             const T *__restrict__ scales,   // [N, 3] optional
             const T *__restrict__ opacities,// [N, 1] optional
@@ -580,9 +553,9 @@ namespace gsplat {
         means += gid * 3;
         viewmats += cid * 16;
         Ks += cid * 9;
-        opacities += gid;
+//        opacities += gid;
 
-        conic_opacities += idx * 4;
+        conic_opacities += gid * 4;
 
         v_means2d += idx * 2;
         v_depths += idx;
@@ -786,13 +759,6 @@ namespace gsplat {
         GSPLAT_CHECK_INPUT(v_ray_planes);
         GSPLAT_CHECK_INPUT(v_normals);
         GSPLAT_CHECK_INPUT(v_ts);
-//        if (compensations.has_value()) {
-//            GSPLAT_CHECK_INPUT(compensations.value());
-//        }
-//        if (v_compensations.has_value()) {
-//            GSPLAT_CHECK_INPUT(v_compensations.value());
-//            assert(compensations.has_value());
-//        }
 
         uint32_t N = means.size(0);    // number of gaussians
         uint32_t C = viewmats.size(0); // number of cameras

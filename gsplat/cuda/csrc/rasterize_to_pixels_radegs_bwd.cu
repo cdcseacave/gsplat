@@ -404,16 +404,16 @@ __global__ void rasterize_to_pixels_bwd_radegs_kernel(
 
                 gpuAtomicAdd(v_opacities + g, v_opacity_local);
 
-                gpuAtomicAdd(v_ts + g, v_ts_local);
+//                gpuAtomicAdd(v_ts + g, v_ts_local);
 
-                S *v_ray_planes_ptr = (S *)(v_ray_planes) + 2 * g;
-                gpuAtomicAdd(v_ray_planes_ptr, v_ray_plane_local.x);
-                gpuAtomicAdd(v_ray_planes_ptr+1, v_ray_plane_local.y);
-
-                S *v_normals_ptr = (S *)(v_normals) + 3 * g;
-                gpuAtomicAdd(v_normals_ptr, v_normal_local.x);
-                gpuAtomicAdd(v_normals_ptr + 1, v_normal_local.y);
-                gpuAtomicAdd(v_normals_ptr + 2, v_normal_local.z);
+//                S *v_ray_planes_ptr = (S *)(v_ray_planes) + 2 * g;
+//                gpuAtomicAdd(v_ray_planes_ptr, v_ray_plane_local.x);
+//                gpuAtomicAdd(v_ray_planes_ptr+1, v_ray_plane_local.y);
+//
+//                S *v_normals_ptr = (S *)(v_normals) + 3 * g;
+//                gpuAtomicAdd(v_normals_ptr, v_normal_local.x);
+//                gpuAtomicAdd(v_normals_ptr + 1, v_normal_local.y);
+//                gpuAtomicAdd(v_normals_ptr + 2, v_normal_local.z);
             }
         }
     }
@@ -630,7 +630,7 @@ rasterize_to_pixels_bwd_radegs_tensor(
     const torch::Tensor &render_alphas, // [C, image_height, image_width, 1]
     const torch::Tensor &render_normals, // [C, image_height, image_width, 3]
     const torch::Tensor &last_ids,      // [C, image_height, image_width]
-    const torch::Tensor &max_ids,      // [C, image_height, image_width]
+    const torch::Tensor &max_ids,      // [C, i<mage_height, image_width]
     // gradients of outputs
     const torch::Tensor &v_render_colors, // [C, image_height, image_width, 3]
     const torch::Tensor &v_render_alphas, // [C, image_height, image_width, 1]
