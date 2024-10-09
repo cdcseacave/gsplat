@@ -2127,6 +2127,8 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
             radii,
             conics,
             normals,
+            radii, means2d, depths, conics, compensations,
+            camera_plane, normals, ray_plane, coef, invraycov3d, ts
         )
         ctx.width = width
         ctx.height = height
@@ -2146,7 +2148,16 @@ class _FullyFusedProjectionRade(torch.autograd.Function):
             radii,
             conics,
             normals,
+            radii, means2d, depths, conics, compensations,
+            camera_plane, normals, ray_plane, coef, invraycov3d, ts
         ) = ctx.saved_tensors
+
+        # # v_depths = torch.zeros_like(depths)
+        # # v_conics = torch.zeros_like(conics)
+        # v_camera_plane = torch.zeros_like(camera_plane)
+        # v_normals = torch.zeros_like(normals)
+        # v_ray_plane = torch.zeros_like(ray_plane)
+        # # v_ts = torch.zeros_like(ts)
 
         width = ctx.width
         height = ctx.height
@@ -2420,7 +2431,7 @@ class _RasterizeToPixelsRADE(torch.autograd.Function):
         ctx.absgrad = absgrad
 
         # double to float
-        render_alphas = render_alphas.float()
+        # render_alphas = render_alphas.float()
         return render_colors, render_alphas, render_depths, render_mdepths, render_normals
 
     @staticmethod

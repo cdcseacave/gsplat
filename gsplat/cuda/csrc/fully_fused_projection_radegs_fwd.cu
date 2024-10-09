@@ -44,7 +44,7 @@ __global__ void fully_fused_projection_fwd_radegs_kernel(
     const bool ortho,
     float kernel_size,
     // outputs
-    int32_t *__restrict__ radii,  // [C, N]
+    T *__restrict__ radii,  // [C, N]
     T *__restrict__ means2d,      // [C, N, 2]
     T *__restrict__ depths,       // [C, N]
     T *__restrict__ conic_opacities,       // [C, N, 4]
@@ -111,18 +111,6 @@ __global__ void fully_fused_projection_fwd_radegs_kernel(
     mat2<T> covar2d;
     vec2<T> mean2d;
 
-//    printf("Doing perspective projection\n");
-//    printf("     mean_c: %f %f %f\n", mean_c.x, mean_c.y, mean_c.z);
-//    printf("     covar_c: %f %f %f\n", covar_c[0][0], covar_c[0][1], covar_c[0][2]);
-//    printf("               %f %f %f\n", covar_c[1][0], covar_c[1][1], covar_c[1][2]);
-//    printf("               %f %f %f\n", covar_c[2][0], covar_c[2][1], covar_c[2][2]);
-//    printf("     Ks: %f %f %f\n", Ks[0], Ks[1], Ks[2]);
-//    printf("         %f %f %f\n", Ks[3], Ks[4], Ks[5]);
-//    printf("         %f %f %f\n", Ks[6], Ks[7], Ks[8]);
-//    printf("     image_width: %d\n", image_width);
-//    printf("     image_height: %d\n", image_height);
-
-
     if (ortho){
         ortho_proj<T>(
             mean_c,
@@ -150,10 +138,6 @@ __global__ void fully_fused_projection_fwd_radegs_kernel(
             mean2d
         );
     }
-//    printf("     resulted\n");
-//    printf("     covar2d: %f %f\n", covar2d[0][0], covar2d[0][1]);
-//    printf("               %f %f\n", covar2d[1][0], covar2d[1][1]);
-//    printf("     mean2d: %f %f\n", mean2d.x, mean2d.y);
 
     means2d[idx * 2] = 0;
     means2d[idx * 2 + 1] = 0;
@@ -190,7 +174,7 @@ __global__ void fully_fused_projection_fwd_radegs_kernel(
     }
 
     // write to outputs
-    radii[idx] = (int32_t)radius;
+    radii[idx] = radius;
     means2d[idx * 2] = mean2d.x;
     means2d[idx * 2 + 1] = mean2d.y;
     ts[idx] = sqrt(mean_c.x * mean_c.x + mean_c.y * mean_c.y + mean_c.z * mean_c.z);
@@ -212,8 +196,8 @@ __global__ void fully_fused_projection_fwd_radegs_kernel(
     // RaDe-GS variables
     mat3<T> cov = covar_c; // covariance in camera space
     mat3<T> Vrk = covar; // covariance in world space
-    const T focal_x = Ks[0];
-    const T focal_y = Ks[4];
+    T focal_x = Ks[0];
+    T focal_y = Ks[4];
 
     // RaDe-GS specific computations
     const T det_0 = max(1e-6, cov[0][0] * cov[1][1] - cov[0][1] * cov[0][1]);
@@ -343,6 +327,8 @@ __global__ void fully_fused_projection_fwd_radegs_kernel(
             invraycov3Ds[5] = inv_cov_ray[2][2];
         }
 
+        focal_x = 1;
+        focal_y = 1;
 
         T vbn = glm::dot(uvh_mn, uvh);
         T factor_normal = l / (u2+v2+1);
@@ -416,7 +402,7 @@ fully_fused_projection_fwd_radegs_tensor(
     at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
     torch::Tensor radii =
-        torch::empty({C, N}, means.options().dtype(torch::kInt32));
+        torch::empty({C, N}, means.options());
     torch::Tensor means2d = torch::empty({C, N, 2}, means.options());
     torch::Tensor depths = torch::empty({C, N}, means.options());
     torch::Tensor conic_opacities = torch::empty({C, N, 4}, means.options());
@@ -427,8 +413,6 @@ fully_fused_projection_fwd_radegs_tensor(
     torch::Tensor coef = torch::empty({C, N}, means.options());
     torch::Tensor invraycov3Ds = torch::empty({C, N, 6}, means.options());
     torch::Tensor ts = torch::empty({C, N}, means.options());
-
-//    printf("CREATED measn2d %d %d %d\n", means2d.size(0), means2d.size(1), means2d.size(2));
 
     const float kernel_size = 0.1f;
 
@@ -461,7 +445,7 @@ fully_fused_projection_fwd_radegs_tensor(
                     radius_clip,
                     ortho,
                     kernel_size,
-                    radii.data_ptr<int32_t>(),
+                    radii.data_ptr<T>(),
                     means2d.data_ptr<T>(),
                     depths.data_ptr<T>(),
                     conic_opacities.data_ptr<T>(),
@@ -497,7 +481,7 @@ fully_fused_projection_fwd_radegs_tensor(
                     radius_clip,
                     ortho,
                     kernel_size,
-                    radii.data_ptr<int32_t>(),
+                    radii.data_ptr<T>(),
                     means2d.data_ptr<T>(),
                     depths.data_ptr<T>(),
                     conic_opacities.data_ptr<T>(),

@@ -2,7 +2,7 @@ import math
 import torch
 from torch import Tensor
 from gsplat.cuda._wrapper import _FullyFusedProjectionRade, _make_lazy_cuda_func, _RasterizeToPixelsRADE, isect_tiles, \
-    isect_offset_encode
+    isect_offset_encode, _FullyFusedProjection
 from torch.autograd import Function
 from torch.autograd import gradcheck
 from typing import Tuple
@@ -12,6 +12,27 @@ from gsplat.rendering import rasterization_rade_inria_wrapper
 torch.use_deterministic_algorithms(True)
 import sys
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+width = 765
+height = 572
+
+start = 0
+end = 5
+
 # Check if GPU is available and set the device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -19,25 +40,65 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 means = torch.load("means.pt", weights_only=True).to(device=device)
 quats = torch.load("quats.pt", weights_only=True).to(device=device)
 scales = torch.load("scales.pt", weights_only=True).to(device=device)
-opacities = torch.load("opacities.pt", weights_only=True).to(device=device)
+opacities = torch.load("opacities.pt", weights_only=True).to(device=device).contiguous()
 colors = torch.load("colors.pt", weights_only=True).to(device=device)
-viewmats = torch.load("viewmats.pt", weights_only=True).to(device=device)
+viewmats = torch.load("viewmats.pt", weights_only=True).to(device=device).contiguous()
 Ks = torch.load("Ks.pt", weights_only=True).to(device=device)
 
-width = 765
-height = 572
+if start is not None and end is not None:
+    means = means[start:end]
+    quats = quats[start:end]
+    scales = scales[start:end]
+    opacities = opacities[start:end]
+    colors = colors[start:end]
+    viewmats = viewmats[start:end]
+    Ks = Ks[start:end]
 
-render_colors = None
-render_alphas = None
-render_depths = None
-render_normals = None
+means = means.double()
+quats = quats.double()
+scales = scales.double()
+opacities = opacities.double()
+colors = colors.double()
+viewmats = viewmats.double()
+Ks = Ks.double()
 
 
-fully_fused_projection = _FullyFusedProjectionRade.apply
-rasterize_to_pixels = _RasterizeToPixelsRADE.apply
+fully_fused_projection_rade = _FullyFusedProjectionRade.apply
+#
+# input_rade = (means, quats, scales, opacities, viewmats, Ks, width, height, 0.3, 0.01, 1e10, 0.0, False, False)
+#
+# gradcheck_result = gradcheck(fully_fused_projection_rade, input_rade, eps=1e-5)
+#
+# if not gradcheck_result:
+#     raise Exception("Gradcheck failed")
+#
+# print("Gradcheck passed")
+# sys.exit(0)
+
+
+
+
 
 # Forward pass
-radii, means2d, conics, depths, ts, normals, camera_planes, ray_planes = fully_fused_projection(means, quats, scales, viewmats, opacities, Ks, width, height)
+radii, means2d, conics, depths, camera_planes, normals, ray_planes, ts = fully_fused_projection_rade(means, quats, scales, opacities, viewmats,
+                                                                                                Ks, width, height,
+                                                                                                0.3,
+                                                                                                0.01,
+                                                                                                1e10,
+                                                                                                0.0,
+                                                                                                False,
+                                                                                                False,
+                                                                                                )
+
+means2d = means2d.double()
+conics = conics.double()
+depths = depths.double()
+camera_planes = camera_planes.double()
+ray_planes = ray_planes.double()
+normals = normals.double()
+ts = ts.double()
+
+
 
 tile_size=16
 
@@ -48,7 +109,7 @@ tile_width = math.ceil(width / float(tile_size))
 tile_height = math.ceil(height / float(tile_size))
 tiles_per_gauss, isect_ids, flatten_ids = isect_tiles(
     means2d,
-    radii,
+    radii.int(),
     depths,
     tile_size,
     tile_width,
@@ -62,29 +123,35 @@ tiles_per_gauss, isect_ids, flatten_ids = isect_tiles(
 isect_offsets = isect_offset_encode(isect_ids, C, tile_width, tile_height)
 
 
-ret = rasterize_to_pixels(
-            means2d,
-            conics,
-            colors,
-            opacities,
-            camera_planes,
-            ray_planes,
-            normals,
-            ts,
-            Ks[0],
-            width,
-            height,
-            tile_size,
-            isect_offsets,
-            flatten_ids,
-            backgrounds=None,
-            packed=False,
-            absgrad=False,
-        )
+rasterize_to_pixels = _RasterizeToPixelsRADE.apply
+
+input = (means2d,
+         conics,
+         colors,
+         opacities,
+         camera_planes,
+         ray_planes,
+         normals,
+         ts,
+         Ks[0].double(),
+         None,
+         None,
+         width,
+         height,
+         tile_size,
+         isect_offsets,
+         flatten_ids,
+         False)
 
 
 
+gradcheck_result = gradcheck(rasterize_to_pixels, input, eps=1e-5)
 
+if not gradcheck_result:
+    raise Exception("Gradcheck failed")
+
+print("Gradcheck passed")
+sys.exit(0)
 
 
 
@@ -145,7 +212,7 @@ double_Ks = Ks.double()#.requires_grad_()
 
 
 
-test = _FullyFusedProjectionRadePlayground.apply
+test = _FullyFusedProjectionRade.apply
 input = (double_means, double_quats, double_scales, double_viewmats, double_opacities, double_Ks)
 
 outputs = test(*input)
@@ -188,7 +255,10 @@ double_viewmats = viewmats.double()#.requires_grad_()
 double_opacities = torch.ones(means.shape[0], dtype=torch.float64).to(device=device)#.requires_grad_()
 double_Ks = Ks.double()#.requires_grad_()
 
-input = (double_means, double_quats, double_scales, double_viewmats, double_opacities, double_Ks, width, height)
+
+
+input_rade = (double_means, double_quats, double_scales, double_viewmats, double_opacities, double_Ks, width, height)
+input_3dgs = (double_means, None, double_quats, double_scales, double_viewmats, double_Ks, width, height)
 
 outputs = test(*input)
 

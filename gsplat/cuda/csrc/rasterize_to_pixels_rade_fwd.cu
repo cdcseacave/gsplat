@@ -63,8 +63,8 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     tile_offsets += camera_id * tile_height * tile_width;
     render_colors += camera_id * image_height * image_width * COLOR_DIM;
     render_alphas += camera_id * image_height * image_width;
-//    render_depths += camera_id * image_height * image_width;
-//    render_normals += camera_id * image_height * image_width * 3;
+    render_depths += camera_id * image_height * image_width;
+    render_normals += camera_id * image_height * image_width * 3;
     last_ids += camera_id * image_height * image_width;
 
     if (backgrounds != nullptr) {
@@ -78,14 +78,14 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     S py = (S)i + 0.5f;
     int32_t pix_id = i * image_width + j;
 
-//    const S fx = K[0];
-//    const S fy = K[4];
-//    const S cx = K[2];
-//    const S cy = K[5];
-//
-//    vec2<S> pixf = { (float)px, (float)py };
-//    float2 pixnf = {(pixf.x-image_width/2.f)/fx,(pixf.y-image_height/2.f)/fy};
-//    float ln = sqrt(pixnf.x*pixnf.x+pixnf.y*pixnf.y+1);
+    const S fx = K[0];
+    const S fy = K[4];
+    const S cx = K[2];
+    const S cy = K[5];
+
+    vec2<S> pixf = { (S)px, (S)py };
+    vec2<S> pixnf = {(pixf.x-image_width/S(2.))/fx,(pixf.y-image_height/S(2.))/fy};
+    S ln = sqrt(pixnf.x*pixnf.x+pixnf.y*pixnf.y+1);
 
     // return if out of bounds
     // keep not rasterizing threads around for reading data
@@ -117,15 +117,15 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     extern __shared__ int s[];
     int32_t *id_batch = (int32_t *)s; // [block_size]
     vec3<S> *xy_opacity_batch =
-        reinterpret_cast<vec3<float> *>(&id_batch[block_size]); // [block_size]
+        reinterpret_cast<vec3<S> *>(&id_batch[block_size]); // [block_size]
     vec3<S> *conic_batch =
-        reinterpret_cast<vec3<float> *>(&xy_opacity_batch[block_size]
+        reinterpret_cast<vec3<S> *>(&xy_opacity_batch[block_size]
         ); // [block_size]
-//    vec3<S> *normal_batch =
-//        reinterpret_cast<vec3<float> *>(&conic_batch[block_size]); // [block_size]
-//    float *ts_batch = reinterpret_cast<float *>(&normal_batch[block_size]); // [block_size]
-//    vec2<S> *ray_plane_batch =
-//        reinterpret_cast<vec2<float> *>(&ts_batch[block_size]); // [block_size]
+    vec3<S> *normal_batch =
+        reinterpret_cast<vec3<S> *>(&conic_batch[block_size]); // [block_size]
+    S *ts_batch = reinterpret_cast<S *>(&normal_batch[block_size]); // [block_size]
+    vec2<S> *ray_plane_batch =
+        reinterpret_cast<vec2<S> *>(&ts_batch[block_size]); // [block_size]
 
 
     // current visibility left to render
@@ -142,13 +142,13 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
     uint32_t tr = block.thread_rank();
 
     S pix_out[COLOR_DIM] = {0.f};
-//    vec3<S> normal_out = {0.f, 0.f, 0.f};
-//    float depth_out = 0;
-//    float m_depth_out = 0;
-//    float weight = 0;
-//
-//    uint32_t last_contributor = 0;
-//    uint32_t max_contributor = 0;
+    vec3<S> normal_out = {0.f, 0.f, 0.f};
+    S depth_out = 0;
+    S m_depth_out = 0;
+    S weight = 0;
+
+    uint32_t last_contributor = 0;
+    uint32_t max_contributor = 0;
 
     for (uint32_t b = 0; b < num_batches; ++b) {
         // resync all threads before beginning next batch
@@ -168,20 +168,20 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
             const S opac = opacities[g];
             xy_opacity_batch[tr] = {xy.x, xy.y, opac};
             conic_batch[tr] = conics[g];
-//            normal_batch[tr] = normals[g];
-//            ts_batch[tr] = ts[g];
-//            ray_plane_batch[tr] = ray_planes[g];
+            normal_batch[tr] = normals[g];
+            ts_batch[tr] = ts[g];
+            ray_plane_batch[tr] = ray_planes[g];
         }
 
         // wait for other threads to collect the gaussians in batch
         block.sync();
 
-//	    uint32_t contributor = 0;
+	    uint32_t contributor = 0;
 
         // process gaussians in the current batch for this pixel
         uint32_t batch_size = min(block_size, range_end - batch_start);
         for (uint32_t t = 0; (t < batch_size) && !done; ++t) {
-//            contributor++;
+            contributor++;
 
             const vec3<S> conic = conic_batch[t];
             const vec3<S> xy_opac = xy_opacity_batch[t];
@@ -210,25 +210,25 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
                 pix_out[k] += c_ptr[k] * vis;
             }
 
-//            normal_out += normal_batch[t] * vis;
-//
-//            bool before_median = T > 0.5;
-//
-//            float t_center = ts_batch[t];
-//            vec2<S> ray_plane = ray_plane_batch[t];
-//            float depth_t = t_center + (ray_plane.x * delta.x + ray_plane.y * delta.y);
-//
-//            depth_out += depth_t * vis;
-//            if (before_median) m_depth_out = depth_t;
+            normal_out += normal_batch[t] * vis;
+
+            bool before_median = T > 0.5;
+
+            float t_center = ts_batch[t];
+            vec2<S> ray_plane = ray_plane_batch[t];
+            float depth_t = t_center + (ray_plane.x * delta.x + ray_plane.y * delta.y);
+
+            depth_out += depth_t * vis;
+            if (before_median) m_depth_out = depth_t;
 
             cur_idx = batch_start + t;
 
-//            weight += vis;
+            weight += vis;
             T = next_T;
-//            last_contributor = contributor;
-//
-//            if (before_median)
-//                max_contributor = contributor + batch_start;
+            last_contributor = contributor;
+
+            if (before_median)
+                max_contributor = contributor + batch_start;
         }
     }
 
@@ -248,36 +248,36 @@ __global__ void rasterize_to_pixels_fwd_radegs_kernel(
                                        : (pix_out[k] + T * backgrounds[k]);
         }
 
-//        // normal
-//        if (last_contributor) {
-//            float len_normal = sqrt(normal_out.x * normal_out.x + normal_out.y * normal_out.y + normal_out.z * normal_out.z);
-//            GSPLAT_PRAGMA_UNROLL
-//            for (uint32_t k = 0; k < 3; ++k) {
-//                render_normals[pix_id * 3 + k] = normal_out[k] / max(len_normal, NORMALIZE_EPS) / weight;
-//            }
-//        } else {
-//            GSPLAT_PRAGMA_UNROLL
-//            for (uint32_t k = 0; k < 3; ++k) {
-//                render_normals[pix_id * 3 + k] = 0.0f;
-//            }
-//        }
-//
-//        // depth
-//        if(last_contributor)
-//        {
-//                render_depths[pix_id] = depth_out / ln / weight;
-//        }
-//        else
-//        {
-//                render_depths[pix_id] = 0;
-//        }
-//        render_mdepths[pix_id] = m_depth_out / ln;
+        // normal
+        if (last_contributor) {
+            float len_normal = sqrt(normal_out.x * normal_out.x + normal_out.y * normal_out.y + normal_out.z * normal_out.z);
+            GSPLAT_PRAGMA_UNROLL
+            for (uint32_t k = 0; k < 3; ++k) {
+                render_normals[pix_id * 3 + k] = normal_out[k] / max(len_normal, NORMALIZE_EPS) / weight;
+            }
+        } else {
+            GSPLAT_PRAGMA_UNROLL
+            for (uint32_t k = 0; k < 3; ++k) {
+                render_normals[pix_id * 3 + k] = 0.0f;
+            }
+        }
+
+        // depth
+        if(last_contributor)
+        {
+                render_depths[pix_id] = depth_out / ln / weight;
+        }
+        else
+        {
+                render_depths[pix_id] = 0;
+        }
+        render_mdepths[pix_id] = m_depth_out / ln;
 
         // index in bin of last gaussian in this pixel
         last_ids[pix_id] = static_cast<int32_t>(cur_idx);
 
         // TODO: should add batch_start to max_contributor?
-//        max_contrib_ids[pix_id] = static_cast<int32_t>(max_contributor);
+        max_contrib_ids[pix_id] = static_cast<int32_t>(max_contributor);
     }
 }
 
@@ -333,23 +333,23 @@ call_kernel_with_dim(
 
     torch::Tensor renders = torch::empty(
         {C, image_height, image_width, channels},
-        means2d.options().dtype(torch::kFloat32)
+        means2d.options()
     );
     torch::Tensor alphas = torch::empty(
         {C, image_height, image_width, 1},
-        means2d.options().dtype(torch::kFloat32)
+        means2d.options()
     );
     torch::Tensor depths = torch::empty(
         {C, image_height, image_width, 1},
-        means2d.options().dtype(torch::kFloat32)
+        means2d.options()
     );
     torch::Tensor mdepths = torch::empty(
             {C, image_height, image_width, 1},
-            means2d.options().dtype(torch::kFloat32)
+            means2d.options()
     );
     torch::Tensor render_normals = torch::empty(
         {C, image_height, image_width, 3},
-        means2d.options().dtype(torch::kFloat32)
+        means2d.options()
     );
     torch::Tensor last_ids = torch::empty(
         {C, image_height, image_width}, means2d.options().dtype(torch::kInt32)
@@ -359,57 +359,122 @@ call_kernel_with_dim(
     );
 
     at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
-    const uint32_t shared_mem =
-        tile_size * tile_size *
-        (sizeof(int32_t) + sizeof(vec3<float>) + sizeof(vec3<float>)
-         + sizeof(float) + sizeof(vec3<float>) + sizeof(vec2<float>));
 
-    // TODO: an optimization can be done by passing the actual number of
-    // channels into the kernel functions and avoid necessary global memory
-    // writes. This requires moving the channel padding from python to C side.
-    if (cudaFuncSetAttribute(
-            rasterize_to_pixels_fwd_radegs_kernel<CDIM, float>,
-            cudaFuncAttributeMaxDynamicSharedMemorySize,
-            shared_mem
+
+    if (means2d.scalar_type() == torch::kFloat32) {
+        using T = float;
+
+
+        const uint32_t shared_mem =
+                tile_size * tile_size *
+                (sizeof(int32_t) + sizeof(vec3<T>) + sizeof(vec3<T>)
+                 + sizeof(T) + sizeof(vec3<T>) + sizeof(vec2<T>));
+
+        // TODO: an optimization can be done by passing the actual number of
+        // channels into the kernel functions and avoid necessary global memory
+        // writes. This requires moving the channel padding from python to C side.
+        if (cudaFuncSetAttribute(
+                rasterize_to_pixels_fwd_radegs_kernel<CDIM, T>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                shared_mem
         ) != cudaSuccess) {
-        AT_ERROR(
-            "Failed to set maximum shared memory size (requested ",
-            shared_mem,
-            " bytes), try lowering tile_size."
-        );
-    }
-    rasterize_to_pixels_fwd_radegs_kernel<CDIM, float>
+            AT_ERROR(
+                    "Failed to set maximum shared memory size (requested ",
+                    shared_mem,
+                    " bytes), try lowering tile_size."
+            );
+        }
+
+        rasterize_to_pixels_fwd_radegs_kernel<CDIM, T>
         <<<blocks, threads, shared_mem, stream>>>(
-            C,
-            N,
-            n_isects,
-            packed,
-            reinterpret_cast<vec2<float> *>(means2d.data_ptr<float>()),
-            reinterpret_cast<vec3<float> *>(conics.data_ptr<float>()),
-            colors.data_ptr<float>(),
-            opacities.data_ptr<float>(),
-            backgrounds.has_value() ? backgrounds.value().data_ptr<float>() : nullptr,
-            camera_planes.data_ptr<float>(),
-            reinterpret_cast<vec2<float> *>(ray_planes.data_ptr<float>()),
-            reinterpret_cast<vec3<float> *>(normals.data_ptr<float>()),
-            ts.data_ptr<float>(),
-            K.data_ptr<float>(),
-            masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
-            image_width,
-            image_height,
-            tile_size,
-            tile_width,
-            tile_height,
-            tile_offsets.data_ptr<int32_t>(),
-            flatten_ids.data_ptr<int32_t>(),
-            renders.data_ptr<float>(),
-            alphas.data_ptr<float>(),
-            depths.data_ptr<float>(),
-            mdepths.data_ptr<float>(),
-            render_normals.data_ptr<float>(),
-            last_ids.data_ptr<int32_t>(),
-            max_ids.data_ptr<int32_t>()
+                C,
+                N,
+                n_isects,
+                packed,
+                reinterpret_cast<vec2<T> *>(means2d.data_ptr<T>()),
+                reinterpret_cast<vec3<T> *>(conics.data_ptr<T>()),
+                colors.data_ptr<T>(),
+                opacities.data_ptr<T>(),
+                backgrounds.has_value() ? backgrounds.value().data_ptr<T>() : nullptr,
+                camera_planes.data_ptr<T>(),
+                reinterpret_cast<vec2<T> *>(ray_planes.data_ptr<T>()),
+                reinterpret_cast<vec3<T> *>(normals.data_ptr<T>()),
+                ts.data_ptr<T>(),
+                K.data_ptr<T>(),
+                masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
+                image_width,
+                image_height,
+                tile_size,
+                tile_width,
+                tile_height,
+                tile_offsets.data_ptr<int32_t>(),
+                flatten_ids.data_ptr<int32_t>(),
+                renders.data_ptr<T>(),
+                alphas.data_ptr<T>(),
+                depths.data_ptr<T>(),
+                mdepths.data_ptr<T>(),
+                render_normals.data_ptr<T>(),
+                last_ids.data_ptr<int32_t>(),
+                max_ids.data_ptr<int32_t>()
         );
+    } else if (means2d.scalar_type() == torch::kFloat64) {
+        using T = double;
+
+        const uint32_t shared_mem =
+                tile_size * tile_size *
+                (sizeof(int32_t) + sizeof(vec3<T>) + sizeof(vec3<T>)
+                 + sizeof(T) + sizeof(vec3<T>) + sizeof(vec2<T>));
+
+        // TODO: an optimization can be done by passing the actual number of
+        // channels into the kernel functions and avoid necessary global memory
+        // writes. This requires moving the channel padding from python to C side.
+        if (cudaFuncSetAttribute(
+                rasterize_to_pixels_fwd_radegs_kernel<CDIM, T>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                shared_mem
+        ) != cudaSuccess) {
+            AT_ERROR(
+                    "Failed to set maximum shared memory size (requested ",
+                    shared_mem,
+                    " bytes), try lowering tile_size."
+            );
+        }
+
+        rasterize_to_pixels_fwd_radegs_kernel<CDIM, T>
+        <<<blocks, threads, shared_mem, stream>>>(
+                C,
+                N,
+                n_isects,
+                packed,
+                reinterpret_cast<vec2<T> *>(means2d.data_ptr<T>()),
+                reinterpret_cast<vec3<T> *>(conics.data_ptr<T>()),
+                colors.data_ptr<T>(),
+                opacities.data_ptr<T>(),
+                backgrounds.has_value() ? backgrounds.value().data_ptr<T>() : nullptr,
+                camera_planes.data_ptr<T>(),
+                reinterpret_cast<vec2<T> *>(ray_planes.data_ptr<T>()),
+                reinterpret_cast<vec3<T> *>(normals.data_ptr<T>()),
+                ts.data_ptr<T>(),
+                K.data_ptr<T>(),
+                masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
+                image_width,
+                image_height,
+                tile_size,
+                tile_width,
+                tile_height,
+                tile_offsets.data_ptr<int32_t>(),
+                flatten_ids.data_ptr<int32_t>(),
+                renders.data_ptr<T>(),
+                alphas.data_ptr<T>(),
+                depths.data_ptr<T>(),
+                mdepths.data_ptr<T>(),
+                render_normals.data_ptr<T>(),
+                last_ids.data_ptr<int32_t>(),
+                max_ids.data_ptr<int32_t>()
+        );
+    } else {
+        AT_ERROR("Unsupported scalar type: ", means2d.scalar_type());
+    }
 
     return std::make_tuple(renders, alphas, depths, mdepths, render_normals, last_ids, max_ids);
 }

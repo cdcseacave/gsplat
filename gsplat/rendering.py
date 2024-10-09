@@ -2108,7 +2108,7 @@ def rasterization_radegs(
     tile_height = math.ceil(height / float(tile_size))
     tiles_per_gauss, isect_ids, flatten_ids = isect_tiles(
         means2d,
-        radii,
+        radii.int(),
         depths,
         tile_size,
         tile_width,
