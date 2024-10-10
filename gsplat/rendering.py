@@ -1431,9 +1431,6 @@ def rasterization_2dgs_inria_wrapper(
         render_colors.append(render_colors_)
     render_colors = torch.stack(render_colors, dim=0)
 
-    print("RUNNING RADE INRIA WRAPPER")
-    print("ALLMAP SIZE: ", allmap.shape())
-
     # additional maps
     allmap = allmap.permute(1, 2, 0).unsqueeze(0)  # [1, H, W, C]
     render_depth_expected = allmap[..., 0:1]
@@ -1621,7 +1618,7 @@ def rasterization_rade_inria_wrapper(
         "means2d": means2D,
         "width": width,
         "height": height,
-        "radii": radii,
+        "radii": radii.unsqueeze(0),
         "n_cameras": C,
         "gaussian_ids": None,
     }

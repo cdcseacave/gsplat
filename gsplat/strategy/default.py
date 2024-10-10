@@ -244,7 +244,9 @@ class DefaultStrategy(Strategy):
         else:
             # grads is [C, N, 2]
             sel = info["radii"] > 0.0  # [C, N]
-            gs_ids = torch.where(sel)[0]  # [nnz]
+            gs_ids = torch.where(sel)[1]  # [nnz]
+            if grads.dim() == 2:
+                grads = grads.unsqueeze(0)
             grads = grads[sel]  # [nnz, 2]
             radii = info["radii"][sel]  # [nnz]
 

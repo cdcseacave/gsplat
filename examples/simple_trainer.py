@@ -652,7 +652,7 @@ class Runner:
                 depthloss = F.l1_loss(disp, disp_gt) * self.scene_scale
                 loss += depthloss * cfg.depth_lambda
 
-            if cfg.normal_loss and cfg.rasterization_method == "radegs_inria":
+            if cfg.normal_loss and (cfg.rasterization_method == "radegs_inria" or cfg.rasterization_method == "radegs"):
                 if step > cfg.normal_start_iter:
                     curr_normal_lambda = cfg.normal_lambda
                 else:
@@ -669,7 +669,8 @@ class Runner:
                 # normals_from_depth *= alphas.squeeze(0).detach()
                 # if len(normals_from_depth.shape) == 4:
                 #     normals_from_depth = normals_from_depth.squeeze(0)
-                normals_from_depth = normals_from_depth.permute((2, 0, 1))
+                if cfg.rasterization_method == "radegs_inria":
+                    normals_from_depth = normals_from_depth.permute((2, 0, 1))
                 normal_error = (1 - (normals * normals_from_depth).sum(dim=0))[None]
                 normalloss = curr_normal_lambda * normal_error.mean()
                 loss += normalloss
