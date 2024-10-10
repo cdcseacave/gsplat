@@ -1624,7 +1624,7 @@ def rasterization_rade_inria_wrapper(
         "means2d": means2D,
         "width": width,
         "height": height,
-        "radii": radii.unsqueeze(0),
+        "radii": radii,
         "n_cameras": C,
         "gaussian_ids": None,
     }
