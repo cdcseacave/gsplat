@@ -53,7 +53,7 @@ def rasterization(
     rasterize_mode: Literal["classic", "antialiased"] = "classic",
     channel_chunk: int = 32,
     distributed: bool = False,
-    ortho: bool = False,
+    camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
     covars: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Dict]:
     """Rasterize a set of 3D Gaussians (N) to a batch of image planes (C).
@@ -181,8 +181,8 @@ def rasterization(
         distributed: Whether to use distributed rendering. Default is False. If True,
             The input Gaussians are expected to be a subset of scene in each rank, and
             the function will collaboratively render the images for all ranks.
-        ortho: Whether to use orthographic projection. In such case fx and fy become the scaling
-            factors to convert projected coordinates into pixel space and cx, cy become offsets.
+        camera_model: The camera model to use. Supported models are "pinhole", "ortho",
+            and "fisheye". Default is "pinhole".
         covars: Optional covariance matrices of the Gaussians. If provided, the `quats` and
             `scales` will be ignored. [N, 3, 3], Default is None.
 
@@ -314,7 +314,7 @@ def rasterization(
         radius_clip=radius_clip,
         sparse_grad=sparse_grad,
         calc_compensations=(rasterize_mode == "antialiased"),
-        ortho=ortho,
+        camera_model=camera_model,
     )
 
     if packed:
@@ -1310,7 +1310,9 @@ def rasterization_2dgs(
         "gradient_2dgs": densify,  # This holds the gradient used for densification for 2dgs
     }
 
-    render_normals = render_normals @ torch.linalg.inv(viewmats)[0, :3, :3].T
+    render_normals = torch.einsum(
+        "...ij,...hwj->...hwi", torch.linalg.inv(viewmats)[..., :3, :3], render_normals
+    )
 
     return (
         render_colors,
@@ -1451,7 +1453,7 @@ def rasterization_2dgs_inria_wrapper(
         render_depth_expected * (1 - depth_ratio) + (depth_ratio) * render_depth_median
     )
 
-    normals_surf = depth_to_normal(render_depth, viewmats, Ks)
+    normals_surf = depth_to_normal(render_depth, torch.linalg.inv(viewmats), Ks)
     normals_surf = normals_surf * (render_alphas).detach()
 
     render_colors = torch.cat([render_colors, render_depth], dim=-1)
