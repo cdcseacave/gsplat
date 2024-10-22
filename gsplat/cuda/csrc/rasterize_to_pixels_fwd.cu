@@ -23,6 +23,8 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     const vec3<S> *__restrict__ conics,  // [C, N, 3] or [nnz, 3]
     const S *__restrict__ colors,      // [C, N, COLOR_DIM] or [nnz, COLOR_DIM]
     const S *__restrict__ opacities,   // [C, N] or [nnz]
+    const vec4<S> *__restrict__ planes, // [C, N, 4]
+    const S *__restrict__ Ks, // [C, 3, 3]
     const S *__restrict__ backgrounds, // [C, COLOR_DIM]
     const bool *__restrict__ masks,    // [C, tile_height, tile_width]
     const uint32_t image_width,
@@ -32,8 +34,11 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     const uint32_t tile_height,
     const int32_t *__restrict__ tile_offsets, // [C, tile_height, tile_width]
     const int32_t *__restrict__ flatten_ids,  // [n_isects]
+    const bool render_geo,
     S *__restrict__ render_colors, // [C, image_height, image_width, COLOR_DIM]
     S *__restrict__ render_alphas, // [C, image_height, image_width, 1]
+    S *__restrict__ render_planes, // [C, image_height, image_width, 4]
+    S *__restrict__ render_depths, // [C, image_height, image_width, 1]
     int32_t *__restrict__ last_ids // [C, image_height, image_width]
 ) {
     // each thread draws one pixel, but also timeshares caching gaussians in a
@@ -49,6 +54,8 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     tile_offsets += camera_id * tile_height * tile_width;
     render_colors += camera_id * image_height * image_width * COLOR_DIM;
     render_alphas += camera_id * image_height * image_width;
+    render_planes += camera_id * image_height * image_width * 4;
+    render_depths += camera_id * image_height * image_width;
     last_ids += camera_id * image_height * image_width;
     if (backgrounds != nullptr) {
         backgrounds += camera_id * COLOR_DIM;
@@ -60,6 +67,11 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     S px = (S)j + 0.5f;
     S py = (S)i + 0.5f;
     int32_t pix_id = i * image_width + j;
+    const S fx = Ks[0];
+    const S fy = Ks[4];
+    const S cx = Ks[2];
+    const S cy = Ks[5];
+	vec2<S> ray = {(px - cx) / fx, (py - cy) / fy};
 
     // return if out of bounds
     // keep not rasterizing threads around for reading data
@@ -110,6 +122,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     uint32_t tr = block.thread_rank();
 
     S pix_out[COLOR_DIM] = {0.f};
+    S plane_out[4] = {0.f};
     for (uint32_t b = 0; b < num_batches; ++b) {
         // resync all threads before beginning next batch
         // end early if entire tile is done
@@ -157,10 +170,16 @@ __global__ void rasterize_to_pixels_fwd_kernel(
             int32_t g = id_batch[t];
             const S vis = alpha * T;
             const S *c_ptr = colors + g * COLOR_DIM;
+            const S *p_ptr = reinterpret_cast<const S*>(planes + g * 4);
             GSPLAT_PRAGMA_UNROLL
             for (uint32_t k = 0; k < COLOR_DIM; ++k) {
                 pix_out[k] += c_ptr[k] * vis;
             }
+			if (render_geo) {
+                GSPLAT_PRAGMA_UNROLL
+				for (int k = 0; k < 4; ++k)
+					plane_out[k] += p_ptr[k] * vis;
+			}
             cur_idx = batch_start + t;
 
             T = next_T;
@@ -180,18 +199,26 @@ __global__ void rasterize_to_pixels_fwd_kernel(
                 backgrounds == nullptr ? pix_out[k]
                                        : (pix_out[k] + T * backgrounds[k]);
         }
+		if (render_geo) {
+            GSPLAT_PRAGMA_UNROLL
+			for (int k = 0; k < 4; ++k)
+				render_planes[pix_id * 4 + k] = plane_out[k];
+			render_depths[pix_id] = plane_out[3] / -(plane_out[0] * ray.x + plane_out[1] * ray.y + plane_out[2] + 1.0e-8);
+		}
         // index in bin of last gaussian in this pixel
         last_ids[pix_id] = static_cast<int32_t>(cur_idx);
     }
 }
 
 template <uint32_t CDIM>
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
     // Gaussian parameters
     const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
     const torch::Tensor &conics,    // [C, N, 3] or [nnz, 3]
     const torch::Tensor &colors,    // [C, N, channels] or [nnz, channels]
     const torch::Tensor &opacities, // [C, N]  or [nnz]
+    const torch::Tensor &planes,    // [C, N, 4]
+    const torch::Tensor &Ks, // [C, 3, 3]
     const at::optional<torch::Tensor> &backgrounds, // [C, channels]
     const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
     // image size
@@ -200,13 +227,16 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
     const uint32_t tile_size,
     // intersections
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
-    const torch::Tensor &flatten_ids   // [n_isects]
+    const torch::Tensor &flatten_ids,  // [n_isects]
+    const bool render_geo = false
 ) {
     GSPLAT_DEVICE_GUARD(means2d);
     GSPLAT_CHECK_INPUT(means2d);
     GSPLAT_CHECK_INPUT(conics);
     GSPLAT_CHECK_INPUT(colors);
     GSPLAT_CHECK_INPUT(opacities);
+    GSPLAT_CHECK_INPUT(planes);
+    GSPLAT_CHECK_INPUT(Ks);
     GSPLAT_CHECK_INPUT(tile_offsets);
     GSPLAT_CHECK_INPUT(flatten_ids);
     if (backgrounds.has_value()) {
@@ -234,6 +264,14 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
         means2d.options().dtype(torch::kFloat32)
     );
     torch::Tensor alphas = torch::empty(
+        {C, image_height, image_width, 1},
+        means2d.options().dtype(torch::kFloat32)
+    );
+    torch::Tensor render_planes = torch::empty(
+        {C, image_height, image_width, 4},
+        means2d.options().dtype(torch::kFloat32)
+    );
+    torch::Tensor render_depths = torch::empty(
         {C, image_height, image_width, 1},
         means2d.options().dtype(torch::kFloat32)
     );
@@ -270,6 +308,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
             reinterpret_cast<vec3<float> *>(conics.data_ptr<float>()),
             colors.data_ptr<float>(),
             opacities.data_ptr<float>(),
+            reinterpret_cast<vec4<float> *>(planes.data_ptr<float>()),
+            Ks.data_ptr<float>(),
             backgrounds.has_value() ? backgrounds.value().data_ptr<float>()
                                     : nullptr,
             masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
@@ -280,21 +320,26 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> call_kernel_with_dim(
             tile_height,
             tile_offsets.data_ptr<int32_t>(),
             flatten_ids.data_ptr<int32_t>(),
+            render_geo,
             renders.data_ptr<float>(),
             alphas.data_ptr<float>(),
+            render_planes.data_ptr<float>(),
+            render_depths.data_ptr<float>(),
             last_ids.data_ptr<int32_t>()
         );
 
-    return std::make_tuple(renders, alphas, last_ids);
+    return std::make_tuple(renders, alphas, render_planes, render_depths, last_ids);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 rasterize_to_pixels_fwd_tensor(
     // Gaussian parameters
     const torch::Tensor &means2d,   // [C, N, 2] or [nnz, 2]
     const torch::Tensor &conics,    // [C, N, 3] or [nnz, 3]
     const torch::Tensor &colors,    // [C, N, channels] or [nnz, channels]
     const torch::Tensor &opacities, // [C, N]  or [nnz]
+    const torch::Tensor &planes,    // [C, N, 4]
+    const torch::Tensor &Ks, // [C, 3, 3]
     const at::optional<torch::Tensor> &backgrounds, // [C, channels]
     const at::optional<torch::Tensor> &masks, // [C, tile_height, tile_width]
     // image size
@@ -303,7 +348,8 @@ rasterize_to_pixels_fwd_tensor(
     const uint32_t tile_size,
     // intersections
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
-    const torch::Tensor &flatten_ids   // [n_isects]
+    const torch::Tensor &flatten_ids,  // [n_isects]
+    const bool render_geo
 ) {
     GSPLAT_CHECK_INPUT(colors);
     uint32_t channels = colors.size(-1);
@@ -315,13 +361,16 @@ rasterize_to_pixels_fwd_tensor(
             conics,                                                            \
             colors,                                                            \
             opacities,                                                         \
+            planes,                                                            \
+            Ks,                                                                \
             backgrounds,                                                       \
             masks,                                                             \
             image_width,                                                       \
             image_height,                                                      \
             tile_size,                                                         \
             tile_offsets,                                                      \
-            flatten_ids                                                        \
+            flatten_ids,                                                       \
+            render_geo                                                         \
         );
 
     // TODO: an optimization can be done by passing the actual number of

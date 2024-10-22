@@ -165,13 +165,15 @@ torch::Tensor isect_offset_encode_tensor(
     const uint32_t tile_height
 );
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 rasterize_to_pixels_fwd_tensor(
     // Gaussian parameters
     const torch::Tensor &means2d,                   // [C, N, 2]
     const torch::Tensor &conics,                    // [C, N, 3]
     const torch::Tensor &colors,                    // [C, N, D]
-    const torch::Tensor &opacities,                 // [N]
+    const torch::Tensor &opacities,                 // [C, N]
+    const torch::Tensor &planes,                    // [C, N, 4]
+    const torch::Tensor &Ks,                        // [C, 3, 3]
     const at::optional<torch::Tensor> &backgrounds, // [C, D]
     const at::optional<torch::Tensor> &mask, // [C, tile_height, tile_width]
     // image size
@@ -180,7 +182,8 @@ rasterize_to_pixels_fwd_tensor(
     const uint32_t tile_size,
     // intersections
     const torch::Tensor &tile_offsets, // [C, tile_height, tile_width]
-    const torch::Tensor &flatten_ids   // [n_isects]
+    const torch::Tensor &flatten_ids,  // [n_isects]
+    const bool render_geo = false
 );
 
 std::tuple<

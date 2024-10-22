@@ -5,7 +5,6 @@ import torch
 
 from gsplat.rendering import rasterization, rasterization_radegs, rasterization_rade_inria_wrapper
 
-from gsplat import rasterization
 import tifffile
 import tyro
 
@@ -31,23 +30,79 @@ def make_rotation_quat(angle):
 
     return quaternion
 
+def make_rotation_matrix(angles):
+    # Convert angles from degrees to radians
+    angles = [math.radians(angle) for angle in angles]
+
+    # Calculate rotation matrices for each axis
+    cx, cy, cz = [math.cos(angle) for angle in angles]
+    sx, sy, sz = [math.sin(angle) for angle in angles]
+
+    # Rotation matrix around x-axis
+    Rx = torch.tensor([
+        [1, 0, 0],
+        [0, cx, -sx],
+        [0, sx, cx]
+    ], dtype=torch.float32)
+
+    # Rotation matrix around y-axis
+    Ry = torch.tensor([
+        [cy, 0, sy],
+        [0, 1, 0],
+        [-sy, 0, cy]
+    ], dtype=torch.float32)
+
+    # Rotation matrix around z-axis
+    Rz = torch.tensor([
+        [cz, -sz, 0],
+        [sz, cz, 0],
+        [0, 0, 1]
+    ], dtype=torch.float32)
+
+    # Combined rotation matrix
+    R = torch.mm(Rz, torch.mm(Ry, Rx))
+
+    return R
+
+def look_at(eye, target, up=[0.0, 1.0, 0.0], device=None):
+    up = torch.tensor(up, dtype=torch.float32).to(device)
+
+    # Compute forward vector
+    forward = target - eye
+    forward = forward / torch.norm(forward)
+
+    # Compute right vector
+    right = torch.cross(up, forward)
+    right = right / torch.norm(right)
+
+    # Recompute up vector
+    up = torch.cross(forward, right)
+
+    # Create rotation matrix
+    rotation_matrix = torch.stack([right, up, forward], dim=-1)
+
+    return rotation_matrix
 
 def run(rasterization_type: Rasterization):
     # Check if GPU is available and set the device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    quats = make_rotation_quat(45)
+    quats = make_rotation_quat(-45)
 
     # Define the single splat in the center of the scene
-    means = torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32).to(device)  # [N, 3]
+    means = torch.tensor([[2.0, 0.1, 5.0]], dtype=torch.float32).to(device)  # [N, 3]
     quats = torch.tensor(quats, dtype=torch.float32).to(device)  # [N, 4]
     scales = torch.tensor([[1.0, 1.0, 0.1]], dtype=torch.float32).to(device)  # [N, 3]
     opacities = torch.tensor([1.0], dtype=torch.float32).to(device)  # [N]
     colors = torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32).to(device)  # [N, 3]
 
     # Define the camera parameters
+    C = torch.tensor([0.0, 1.0, 10.0], dtype=torch.float32).to(device)  # [C, 3]
+    R = look_at(C, means[0], device=device)  # [C, 3, 3]
+    # Compose view matrix as the transform that contains R and C
     viewmats = torch.eye(4, dtype=torch.float32).unsqueeze(0).to(device)  # [C, 4, 4]
-    viewmats[0, 2, 3] = 5.0  # Move the camera back along the z-axis
+    viewmats[0, :3, :3] = R
+    viewmats[0, :3, 3] = -torch.matmul(R, C)
 
     Ks = torch.tensor([[[300.0, 0.0, 150.0], [0.0, 300.0, 100.0], [0.0, 0.0, 1.0]]], dtype=torch.float32).to(device)  # [C, 3, 3]
 
@@ -87,9 +142,11 @@ def run(rasterization_type: Rasterization):
             rasterize_mode="classic",
             channel_chunk=32,
             distributed=False,
-            ortho=False,
             covars=None,
+            render_geo=True,
         )
+        render_depths = meta["render_depths"]
+        render_normals = meta["render_normals"]
         tifffile.imwrite("render_depths_test_3dgs.tiff", render_colors[0,:,:,-1].detach().cpu().numpy())
 
 

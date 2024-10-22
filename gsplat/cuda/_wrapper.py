@@ -442,6 +442,8 @@ def rasterize_to_pixels(
     conics: Tensor,  # [C, N, 3] or [nnz, 3]
     colors: Tensor,  # [C, N, channels] or [nnz, channels]
     opacities: Tensor,  # [C, N] or [nnz]
+    planes: Tensor,  # [C, N, 4]
+    Ks: Tensor,  # [C, N, 3, 3]
     image_width: int,
     image_height: int,
     tile_size: int,
@@ -451,7 +453,8 @@ def rasterize_to_pixels(
     masks: Optional[Tensor] = None,  # [C, tile_height, tile_width]
     packed: bool = False,
     absgrad: bool = False,
-) -> Tuple[Tensor, Tensor]:
+    render_geo: bool = False,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """Rasterizes Gaussians to pixels.
 
     Args:
@@ -474,6 +477,8 @@ def rasterize_to_pixels(
 
         - **Rendered colors**. [C, image_height, image_width, channels]
         - **Rendered alphas**. [C, image_height, image_width, 1]
+        - **Rendered planes**. [C, image_height, image_width, 4]
+        - **Rendered depths**. [C, image_height, image_width, 1]
     """
 
     C = isect_offsets.size(0)
@@ -490,6 +495,8 @@ def rasterize_to_pixels(
         assert conics.shape == (C, N, 3), conics.shape
         assert colors.shape[:2] == (C, N), colors.shape
         assert opacities.shape == (C, N), opacities.shape
+        assert planes.shape == (C, N, 4), planes.shape
+        assert Ks.shape == (C, 3, 3), Ks.shape
     if backgrounds is not None:
         assert backgrounds.shape == (C, colors.shape[-1]), backgrounds.shape
         backgrounds = backgrounds.contiguous()
@@ -552,11 +559,13 @@ def rasterize_to_pixels(
         tile_width * tile_size >= image_width
     ), f"Assert Failed: {tile_width} * {tile_size} >= {image_width}"
 
-    render_colors, render_alphas = _RasterizeToPixels.apply(
+    render_colors, render_alphas, render_planes, render_depths = _RasterizeToPixels.apply(
         means2d.contiguous(),
         conics.contiguous(),
         colors.contiguous(),
         opacities.contiguous(),
+        planes.contiguous(),
+        Ks.contiguous(),
         backgrounds,
         masks,
         image_width,
@@ -565,11 +574,12 @@ def rasterize_to_pixels(
         isect_offsets.contiguous(),
         flatten_ids.contiguous(),
         absgrad,
+        render_geo,
     )
 
     if padded_channels > 0:
         render_colors = render_colors[..., :-padded_channels]
-    return render_colors, render_alphas
+    return render_colors, render_alphas, render_planes, render_depths
 
 
 @torch.no_grad()
@@ -912,6 +922,8 @@ class _RasterizeToPixels(torch.autograd.Function):
         conics: Tensor,  # [C, N, 3]
         colors: Tensor,  # [C, N, D]
         opacities: Tensor,  # [C, N]
+        planes: Tensor,  # [C, N, 4]
+        Ks: Tensor,  # [C, N, 3, 3]
         backgrounds: Tensor,  # [C, D], Optional
         masks: Tensor,  # [C, tile_height, tile_width], Optional
         width: int,
@@ -920,14 +932,17 @@ class _RasterizeToPixels(torch.autograd.Function):
         isect_offsets: Tensor,  # [C, tile_height, tile_width]
         flatten_ids: Tensor,  # [n_isects]
         absgrad: bool,
+        render_geo: bool,
     ) -> Tuple[Tensor, Tensor]:
-        render_colors, render_alphas, last_ids = _make_lazy_cuda_func(
+        render_colors, render_alphas, render_planes, render_depths, last_ids = _make_lazy_cuda_func(
             "rasterize_to_pixels_fwd"
         )(
             means2d,
             conics,
             colors,
             opacities,
+            planes,
+            Ks,
             backgrounds,
             masks,
             width,
@@ -935,6 +950,7 @@ class _RasterizeToPixels(torch.autograd.Function):
             tile_size,
             isect_offsets,
             flatten_ids,
+            render_geo,
         )
 
         ctx.save_for_backward(
@@ -942,21 +958,24 @@ class _RasterizeToPixels(torch.autograd.Function):
             conics,
             colors,
             opacities,
+            planes,
             backgrounds,
             masks,
             isect_offsets,
             flatten_ids,
             render_alphas,
+            render_planes,
             last_ids,
         )
         ctx.width = width
         ctx.height = height
         ctx.tile_size = tile_size
         ctx.absgrad = absgrad
+        ctx.render_geo = render_geo
 
         # double to float
         render_alphas = render_alphas.float()
-        return render_colors, render_alphas
+        return render_colors, render_alphas, render_planes, render_depths
 
     @staticmethod
     def backward(

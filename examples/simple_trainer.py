@@ -83,11 +83,11 @@ class Config:
     steps_scaler: float = 1.0
 
     # Number of training steps
-    max_steps: int = 30_000
+    max_steps: int = 7_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    eval_steps: List[int] = field(default_factory=lambda: [7_000])
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [7_000, 30_000])
+    save_steps: List[int] = field(default_factory=lambda: [7_000])
 
     # Initialization strategy
     init_type: str = "sfm"
@@ -155,13 +155,18 @@ class Config:
     # Shape of the bilateral grid (X, Y, W)
     bilateral_grid_shape: Tuple[int, int, int] = (16, 16, 8)
 
+    # Enable scale loss. (experimental)
+    scale_loss: bool = True
+    # Weight for scale loss
+    scale_lambda: float = 1e+2
+
     # Enable depth loss. (experimental)
     depth_loss: bool = False
     # Weight for depth loss
     depth_lambda: float = 1e-2
 
     # Enable normal consistency loss. (Currently for RaDe-GS only)
-    normal_loss: bool = True
+    normal_loss: bool = False
     # Weight for normal loss
     normal_lambda: float = 5e-2
     # Iteration to start normal consistency regulerization
@@ -174,7 +179,7 @@ class Config:
 
     lpips_net: Literal["vgg", "alex"] = "alex"
 
-    rasterization_method: Literal["gs3d", "radegs", "radegs_inria"] = "radegs_inria" #"gs3d"
+    rasterization_method: Literal["gs3d", "radegs", "radegs_inria"] = "gs3d"
 
     def adjust_steps(self, factor: float):
         self.eval_steps = [int(i * factor) for i in self.eval_steps]
@@ -505,6 +510,7 @@ class Runner:
                 sparse_grad=self.cfg.sparse_grad,
                 rasterize_mode=rasterize_mode,
                 distributed=self.world_size > 1,
+                render_geo=True,
                 **kwargs,
             )
         elif rasterization_method == "radegs":
@@ -706,6 +712,11 @@ class Runner:
                 colors.permute(0, 3, 1, 2), pixels.permute(0, 3, 1, 2), padding="valid"
             )
             loss = l1loss * (1.0 - cfg.ssim_lambda) + ssimloss * cfg.ssim_lambda
+            if cfg.scale_loss:
+                scales = torch.exp(self.splats["scales"])  # [N, 3]
+                sorted_scales, _ = torch.sort(scales, dim=-1)
+                min_scale_loss = sorted_scales[...,0]
+                loss += cfg.depth_lambda * min_scale_loss.mean()
             if cfg.depth_loss:
                 # query depths from depth map
                 points = torch.stack(

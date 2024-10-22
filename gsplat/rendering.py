@@ -55,6 +55,7 @@ def rasterization(
     distributed: bool = False,
     camera_model: Literal["pinhole", "ortho", "fisheye"] = "pinhole",
     covars: Optional[Tensor] = None,
+    render_geo: bool = False,
 ) -> Tuple[Tensor, Tensor, Dict]:
     """Rasterize a set of 3D Gaussians (N) to a batch of image planes (C).
 
@@ -528,6 +529,51 @@ def rasterization(
         }
     )
 
+    def _quat_to_rotmat(quats: Tensor) -> Tensor:
+        """Convert quaternion to rotation matrix."""
+        quats = F.normalize(quats, p=2, dim=-1)
+        w, x, y, z = torch.unbind(quats, dim=-1)
+        R = torch.stack(
+            [
+                1 - 2 * (y**2 + z**2),
+                2 * (x * y - w * z),
+                2 * (x * z + w * y),
+                2 * (x * y + w * z),
+                1 - 2 * (x**2 + z**2),
+                2 * (y * z - w * x),
+                2 * (x * z - w * y),
+                2 * (y * z + w * x),
+                1 - 2 * (x**2 + y**2),
+            ],
+            dim=-1,
+        )
+        return R.reshape(quats.shape[:-1] + (3, 3))
+
+    def get_smallest_axis(quats: Tensor, scales: Tensor) -> Tensor:
+        rotation_matrices = _quat_to_rotmat(quats)
+        smallest_axis_idx = scales.min(dim=-1)[1][..., None, None].expand(-1, 3, -1)
+        smallest_axis = rotation_matrices.gather(2, smallest_axis_idx)
+        return smallest_axis.squeeze(dim=2)
+    
+    def get_normal(means: Tensor, quats: Tensor, scales: Tensor, camera_center: Tensor) -> Tensor:
+        normal_global = get_smallest_axis(quats, scales)
+        gaussian_to_cam_global = camera_center - means
+        neg_mask = (normal_global * gaussian_to_cam_global).sum(-1) < 0.0
+        normal_global[neg_mask] = -normal_global[neg_mask]
+        return normal_global
+
+    #viewmats: world to camera transformation matrices. [C, 4, 4].
+    Rot = viewmats[0, :3, :3]  # [C, 3, 3]
+    t = viewmats[0, :3, 3]  # [C, 3]
+    Center = Rot.T @ -t
+    global_normal = get_normal(means, quats, scales, Center)
+    local_normal = global_normal @ Rot
+    pts_in_cam = means @ Rot + t
+    local_distance = (local_normal * pts_in_cam).sum(-1).abs()
+    planes = torch.zeros((C, N, 4)).cuda().float()
+    planes[:, :, :3] = local_normal
+    planes[:, :, 3] = local_distance
+
     # print("rank", world_rank, "Before rasterize_to_pixels")
     if colors.shape[-1] > channel_chunk:
         # slice into chunks
@@ -559,11 +605,13 @@ def rasterization(
         render_colors = torch.cat(render_colors, dim=-1)
         render_alphas = render_alphas[0]  # discard the rest
     else:
-        render_colors, render_alphas = rasterize_to_pixels(
+        render_colors, render_alphas, render_planes, render_depths = rasterize_to_pixels(
             means2d,
             conics,
             colors,
             opacities,
+            planes,
+            Ks,
             width,
             height,
             tile_size,
@@ -572,6 +620,15 @@ def rasterization(
             backgrounds=backgrounds,
             packed=packed,
             absgrad=absgrad,
+            render_geo=render_geo,
+        )
+        render_normals = render_planes[0:3]
+        render_normals = render_normals/(render_normals.norm(dim=-1, keepdim=True)+1.0e-8)
+        meta.update(
+            {
+                "render_depths": render_depths,
+                "render_normals": render_normals
+            }
         )
     if render_mode in ["ED", "RGB+ED"]:
         # normalize the accumulated depth to get the expected depth
