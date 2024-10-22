@@ -64,14 +64,14 @@ __global__ void rasterize_to_pixels_fwd_kernel(
         masks += camera_id * tile_height * tile_width;
     }
 
-    S px = (S)j + 0.5f;
-    S py = (S)i + 0.5f;
-    int32_t pix_id = i * image_width + j;
+    const S px = (S)j + 0.5f;
+    const S py = (S)i + 0.5f;
     const S fx = Ks[0];
     const S fy = Ks[4];
     const S cx = Ks[2];
     const S cy = Ks[5];
-	vec2<S> ray = {(px - cx) / fx, (py - cy) / fy};
+	const vec2<S> ray = {(px - cx) / fx, (py - cy) / fy};
+    const int32_t pix_id = i * image_width + j;
 
     // return if out of bounds
     // keep not rasterizing threads around for reading data
@@ -177,8 +177,9 @@ __global__ void rasterize_to_pixels_fwd_kernel(
             }
 			if (render_geo) {
                 GSPLAT_PRAGMA_UNROLL
-				for (int k = 0; k < 4; ++k)
+				for (int k = 0; k < 4; ++k) {
 					plane_out[k] += p_ptr[k] * vis;
+                }
 			}
             cur_idx = batch_start + t;
 
