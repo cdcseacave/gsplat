@@ -961,6 +961,7 @@ class _RasterizeToPixels(torch.autograd.Function):
             planes,
             backgrounds,
             masks,
+            Ks,
             isect_offsets,
             flatten_ids,
             render_alphas,
@@ -990,17 +991,21 @@ class _RasterizeToPixels(torch.autograd.Function):
             conics,
             colors,
             opacities,
+            planes,
             backgrounds,
             masks,
+            Ks,
             isect_offsets,
             flatten_ids,
             render_alphas,
+            render_planes,
             last_ids,
         ) = ctx.saved_tensors
         width = ctx.width
         height = ctx.height
         tile_size = ctx.tile_size
         absgrad = ctx.absgrad
+        render_geo = ctx.render_geo
 
         (
             v_means2d_abs,
@@ -1008,29 +1013,36 @@ class _RasterizeToPixels(torch.autograd.Function):
             v_conics,
             v_colors,
             v_opacities,
+            v_planes,
         ) = _make_lazy_cuda_func("rasterize_to_pixels_bwd")(
             means2d,
             conics,
             colors,
             opacities,
+            planes,
             backgrounds,
             masks,
+            Ks,
             width,
             height,
             tile_size,
             isect_offsets,
             flatten_ids,
             render_alphas,
+            render_planes,
             last_ids,
             v_render_colors.contiguous(),
             v_render_alphas.contiguous(),
+            v_render_planes.contiguous(),
+            v_render_depths.contiguous(),
             absgrad,
+            render_geo,
         )
 
         if absgrad:
             means2d.absgrad = v_means2d_abs
 
-        if ctx.needs_input_grad[4]:
+        if ctx.needs_input_grad[5]:
             v_backgrounds = (v_render_colors * (1.0 - render_alphas).float()).sum(
                 dim=(1, 2)
             )
@@ -1042,8 +1054,10 @@ class _RasterizeToPixels(torch.autograd.Function):
             v_conics,
             v_colors,
             v_opacities,
-            None,
+            v_planes,
             v_backgrounds,
+            None,
+            None,
             None,
             None,
             None,
