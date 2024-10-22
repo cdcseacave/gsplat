@@ -982,6 +982,8 @@ class _RasterizeToPixels(torch.autograd.Function):
         ctx,
         v_render_colors: Tensor,  # [C, H, W, 3]
         v_render_alphas: Tensor,  # [C, H, W, 1]
+        v_render_planes: Tensor,  # [C, H, W, 4]
+        v_render_depths: Tensor,  # [C, H, W, 1]
     ):
         (
             means2d,
@@ -1040,6 +1042,7 @@ class _RasterizeToPixels(torch.autograd.Function):
             v_conics,
             v_colors,
             v_opacities,
+            None,
             v_backgrounds,
             None,
             None,

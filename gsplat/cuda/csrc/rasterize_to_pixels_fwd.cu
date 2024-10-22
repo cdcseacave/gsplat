@@ -170,7 +170,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
             int32_t g = id_batch[t];
             const S vis = alpha * T;
             const S *c_ptr = colors + g * COLOR_DIM;
-            const S *p_ptr = reinterpret_cast<const S*>(planes + g * 4);
+            const S *p_ptr = reinterpret_cast<const S*>(planes + g);
             GSPLAT_PRAGMA_UNROLL
             for (uint32_t k = 0; k < COLOR_DIM; ++k) {
                 pix_out[k] += c_ptr[k] * vis;
