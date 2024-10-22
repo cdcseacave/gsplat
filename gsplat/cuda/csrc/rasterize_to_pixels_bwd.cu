@@ -182,10 +182,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
                 rgbs_batch[tr * COLOR_DIM + k] = colors[g * COLOR_DIM + k];
             }
 			if (render_geo) {
-                GSPLAT_PRAGMA_UNROLL
-                for (uint32_t k = 0; k < 4; ++k) {
-					planes_batch[tr][k] = planes[g][k];
-                }
+				planes_batch[tr] = planes[g];
 			}
         }
         // wait for other threads to collect the gaussians in batch
