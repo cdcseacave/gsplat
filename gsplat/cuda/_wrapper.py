@@ -990,11 +990,13 @@ class _RasterizeToPixels(torch.autograd.Function):
             conics,
             colors,
             opacities,
+            planes,
             backgrounds,
             masks,
             isect_offsets,
             flatten_ids,
             render_alphas,
+            render_planes,
             last_ids,
         ) = ctx.saved_tensors
         width = ctx.width
@@ -1030,7 +1032,7 @@ class _RasterizeToPixels(torch.autograd.Function):
         if absgrad:
             means2d.absgrad = v_means2d_abs
 
-        if ctx.needs_input_grad[4]:
+        if ctx.needs_input_grad[6]:
             v_backgrounds = (v_render_colors * (1.0 - render_alphas).float()).sum(
                 dim=(1, 2)
             )
@@ -1043,7 +1045,9 @@ class _RasterizeToPixels(torch.autograd.Function):
             v_colors,
             v_opacities,
             None,
+            None,
             v_backgrounds,
+            None,
             None,
             None,
             None,
