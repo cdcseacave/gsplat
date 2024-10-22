@@ -184,7 +184,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
 			if (render_geo) {
                 GSPLAT_PRAGMA_UNROLL
                 for (uint32_t k = 0; k < 4; ++k) {
-					planes_batch[tr * 4][k] = planes[g][k];
+					planes_batch[tr][k] = planes[g][k];
                 }
 			}
         }
