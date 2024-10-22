@@ -300,7 +300,7 @@ __global__ void rasterize_to_pixels_bwd_kernel(
                     }
                 }
             }
-            warpSum<4, S>(v_plane_local, warp);
+            warpSum<decltype(warp), S>(v_plane_local, warp);
             warpSum<COLOR_DIM, S>(v_rgb_local, warp);
             warpSum<decltype(warp), S>(v_conic_local, warp);
             warpSum<decltype(warp), S>(v_xy_local, warp);
