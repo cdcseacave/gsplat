@@ -530,17 +530,14 @@ def rasterization(
     )
 
     #viewmats: world to camera transformation matrices. [C, 4, 4].
-    assert C == 1, "todo: support multiple cameras"
-    Rot = viewmats[0, :3, :3]  # [C, 3, 3]
-    t = viewmats[0, :3, 3]  # [C, 3]
-    Center = Rot.T @ -t
-    global_normal = get_normal(means, quats, scales, Center)
-    local_normal = global_normal @ Rot
-    pts_in_cam = means @ Rot + t
-    local_distance = (local_normal * pts_in_cam).sum(-1).abs()
-    planes = torch.zeros((C, N, 4)).cuda().float()
-    planes[:, :, :3] = local_normal
-    planes[:, :, 3] = local_distance
+    Rot = viewmats[:, :3, :3]  # [C, 3, 3]
+    t = viewmats[:, :3, 3]  # [C, 3]
+    Center = torch.einsum('bij,bj->bi', Rot.transpose(1, 2), -t)  # [C, 3]
+    global_normal = get_normal(means, quats, scales, Center)  # [N, 3]
+    local_normal = torch.einsum('bij,bj->bi', Rot, global_normal)  # [N, 3]
+    pts_in_cam = torch.einsum('bij,nj->bni', Rot, means) + t[:, None, :]  # [C, N, 3]
+    local_distance = torch.einsum('ij,kij->ki', local_normal, pts_in_cam)  # [C, N]
+    planes = torch.cat((local_normal.unsqueeze(0).expand(C, -1, -1), local_distance.unsqueeze(-1)), dim=-1)
 
     # print("rank", world_rank, "Before rasterize_to_pixels")
     if colors.shape[-1] > channel_chunk:

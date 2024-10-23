@@ -25,10 +25,8 @@ def make_rotation_quat(angle):
     qy = math.sin(angle / 2)
     qz = 0.0
 
-    # Create the quaternion tensor
-    quaternion = torch.tensor([[qw, qx, qy, qz]], dtype=torch.float32)
-
-    return quaternion
+    # Return the quaternion
+    return [qw, qx, qy, qz]
 
 def make_rotation_matrix(angles):
     # Convert angles from degrees to radians
@@ -87,18 +85,16 @@ def run(rasterization_type: Rasterization):
     # Check if GPU is available and set the device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    quats = make_rotation_quat(-45)
-
     # Define the single splat in the center of the scene
-    means = torch.tensor([[2.0, 0.1, 5.0]], dtype=torch.float32).to(device)  # [N, 3]
-    quats = torch.tensor(quats, dtype=torch.float32).to(device)  # [N, 4]
-    scales = torch.tensor([[1.0, 1.0, 0.1]], dtype=torch.float32).to(device)  # [N, 3]
-    opacities = torch.tensor([1.0], dtype=torch.float32).to(device)  # [N]
-    colors = torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32).to(device)  # [N, 3]
+    means = torch.tensor([[2.0, 0.1, 5.0], [0.2, 2.1, 5.5]], dtype=torch.float32).to(device)  # [N, 3]
+    quats = torch.tensor([make_rotation_quat(-45), make_rotation_quat(30)], dtype=torch.float32).to(device)  # [N, 4]
+    scales = torch.tensor([[1.0, 0.6, 0.1], [0.8, 0.1, 0.7]], dtype=torch.float32).to(device)  # [N, 3]
+    opacities = torch.tensor([1.0, 0.9], dtype=torch.float32).to(device)  # [N]
+    colors = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=torch.float32).to(device)  # [N, 3]
 
     # Define the camera parameters
-    C = torch.tensor([0.0, 1.0, 10.0], dtype=torch.float32).to(device)  # [C, 3]
-    R = look_at(C, means[0], device=device)  # [C, 3, 3]
+    C = torch.tensor([0.0, 0.5, 10.0], dtype=torch.float32).to(device)  # [C, 3]
+    R = look_at(C, means[0][0], device=device)  # [C, 3, 3]
     # Compose view matrix as the transform that contains R and C
     viewmats = torch.eye(4, dtype=torch.float32).unsqueeze(0).to(device)  # [C, 4, 4]
     viewmats[0, :3, :3] = R
