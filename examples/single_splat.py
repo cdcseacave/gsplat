@@ -8,7 +8,8 @@ from gsplat.rendering import rasterization, rasterization_radegs, rasterization_
 import tifffile
 import tyro
 
-test_grad = False
+test_grad = True
+tensor_type = torch.float32
 
 class Rasterization(enum.Enum):
     GS3D = "gs3d"
@@ -42,21 +43,21 @@ def make_rotation_matrix(angles):
         [1, 0, 0],
         [0, cx, -sx],
         [0, sx, cx]
-    ], dtype=torch.float32)
+    ], dtype=tensor_type)
 
     # Rotation matrix around y-axis
     Ry = torch.tensor([
         [cy, 0, sy],
         [0, 1, 0],
         [-sy, 0, cy]
-    ], dtype=torch.float32)
+    ], dtype=tensor_type)
 
     # Rotation matrix around z-axis
     Rz = torch.tensor([
         [cz, -sz, 0],
         [sz, cz, 0],
         [0, 0, 1]
-    ], dtype=torch.float32)
+    ], dtype=tensor_type)
 
     # Combined rotation matrix
     R = torch.mm(Rz, torch.mm(Ry, Rx))
@@ -64,7 +65,7 @@ def make_rotation_matrix(angles):
     return R
 
 def look_at(eye, target, up=[0.0, 1.0, 0.0], device=None):
-    up = torch.tensor(up, dtype=torch.float32).to(device)
+    up = torch.tensor(up, dtype=tensor_type).to(device)
 
     # Compute forward vector
     forward = target - eye
@@ -87,17 +88,17 @@ def generate_splats():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Define the single splat in the center of the scene
-    means = torch.tensor([[2.0, 0.1, 5.0], [0.2, 2.1, 5.5]], dtype=torch.float32, requires_grad=test_grad).to(device)  # [N, 3]
-    quats = torch.tensor([make_rotation_quat(-45), make_rotation_quat(30)], dtype=torch.float32, requires_grad=test_grad).to(device)  # [N, 4]
-    scales = torch.tensor([[1.0, 0.6, 0.1], [0.8, 0.1, 0.7]], dtype=torch.float32, requires_grad=test_grad).to(device)  # [N, 3]
-    opacities = torch.tensor([1.0, 0.9], dtype=torch.float32, requires_grad=test_grad).to(device)  # [N]
-    colors = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=torch.float32, requires_grad=test_grad).to(device)  # [N, 3]
+    means = torch.tensor([[2.0, 0.1, 5.0], [0.2, 2.1, 5.5]], dtype=tensor_type, requires_grad=test_grad).to(device)  # [N, 3]
+    quats = torch.tensor([make_rotation_quat(-45), make_rotation_quat(30)], dtype=tensor_type, requires_grad=test_grad).to(device)  # [N, 4]
+    scales = torch.tensor([[1.0, 0.6, 0.1], [0.8, 0.1, 0.7]], dtype=tensor_type, requires_grad=test_grad).to(device)  # [N, 3]
+    opacities = torch.tensor([1.0, 0.9], dtype=tensor_type, requires_grad=test_grad).to(device)  # [N]
+    colors = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=tensor_type, requires_grad=test_grad).to(device)  # [N, 3]
 
     # Define the camera parameters
-    C = torch.tensor([0.0, 0.5, 10.0], dtype=torch.float32).to(device)  # [C, 3]
+    C = torch.tensor([0.0, 0.5, 10.0], dtype=tensor_type).to(device)  # [C, 3]
     R = look_at(C, means[0][0], device=device)  # [C, 3, 3]
     # Compose view matrix as the transform that contains R and C
-    viewmats = torch.eye(4, dtype=torch.float32).unsqueeze(0).to(device)  # [C, 4, 4]
+    viewmats = torch.eye(4, dtype=tensor_type).unsqueeze(0).to(device)  # [C, 4, 4]
     viewmats[0, :3, :3] = R
     viewmats[0, :3, 3] = -torch.matmul(R, C)
 
@@ -112,7 +113,7 @@ def generate_splats():
     Ks = torch.tensor([[[float(width), 0.0, float(width)/2.0],
                         [0.0, float(width), float(height)/2.0],
                         [0.0, 0.0, 1.0]]],
-                        dtype=torch.float32).to(device)  # [C, 3, 3]
+                        dtype=tensor_type).to(device)  # [C, 3, 3]
 
     params = [
         # name, value, lr
@@ -244,18 +245,18 @@ def run(rasterization_type: Rasterization):
         valid = torch.autograd.gradcheck(gradcheck_fn, gradcheck_inputs, eps=1e-4, atol=1e-2)
         print("Gradient check: ", valid)
 
-    # Rasterize splats
-    render_colors, render_alphas, render_depths, render_normals = rasterize_splats(splats, viewmats, Ks, width, height, rasterization_type)
-
-    # Save the rendered image
-    if render_colors is not None:
-        tifffile.imwrite("render_colors_test.tiff", render_colors[0].detach().cpu().numpy())
-    if render_alphas is not None:
-        tifffile.imwrite("render_alphas_test.tiff", render_alphas[0].detach().cpu().numpy())
-    if render_depths is not None:
-        tifffile.imwrite("render_depths_test.tiff", render_depths[0].detach().cpu().numpy())
-    if render_normals is not None:
-        tifffile.imwrite("render_normals_test.tiff", render_normals[0].detach().cpu().numpy())
+    # # Rasterize splats
+    # render_colors, render_alphas, render_depths, render_normals = rasterize_splats(splats, viewmats, Ks, width, height, rasterization_type)
+    #
+    # # Save the rendered image
+    # if render_colors is not None:
+    #     tifffile.imwrite("render_colors_test.tiff", render_colors[0].detach().cpu().numpy())
+    # if render_alphas is not None:
+    #     tifffile.imwrite("render_alphas_test.tiff", render_alphas[0].detach().cpu().numpy())
+    # if render_depths is not None:
+    #     tifffile.imwrite("render_depths_test.tiff", render_depths[0].detach().cpu().numpy())
+    # if render_normals is not None:
+    #     tifffile.imwrite("render_normals_test.tiff", render_normals[0].detach().cpu().numpy())
 
 if __name__ == "__main__":
     tyro.cli(run)
