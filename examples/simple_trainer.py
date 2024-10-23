@@ -746,15 +746,15 @@ class Runner:
                 tvloss = 10 * total_variation_loss(self.bil_grids.grids)
                 loss += tvloss
 
-            if cfg.normal_loss:
-                if step > cfg.normal_start_iter:
-                    curr_normal_lambda = cfg.normal_lambda
-                else:
-                    curr_normal_lambda = 0.0
+            if cfg.normal_loss and step > cfg.normal_start_iter:
+                curr_normal_lambda = cfg.normal_lambda
                 viewmats = torch.linalg.inv(camtoworlds)
                 if True:
+                    # normals_from_depth = depth_to_normal(
+                    #     info['render_depths'], torch.linalg.inv(viewmats), Ks
+                    # ).squeeze(0)
                     normals_from_depth = depth_to_normal(
-                        info['render_depths'], torch.linalg.inv(viewmats), Ks
+                        info['render_depths'], torch.eye(4,4).to(device=viewmats.device).unsqueeze(0), Ks
                     ).squeeze(0)
                 else:
                     normals_from_depth = info['normals_from_depth']
