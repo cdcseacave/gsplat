@@ -103,9 +103,9 @@ __global__ void rasterize_to_pixels_fwd_kernel(
     extern __shared__ int s[];
     int32_t *id_batch = (int32_t *)s; // [block_size]
     vec3<S> *xy_opacity_batch =
-        reinterpret_cast<vec3<float> *>(&id_batch[block_size]); // [block_size]
+        reinterpret_cast<vec3<S> *>(&id_batch[block_size]); // [block_size]
     vec3<S> *conic_batch =
-        reinterpret_cast<vec3<float> *>(&xy_opacity_batch[block_size]
+        reinterpret_cast<vec3<S> *>(&xy_opacity_batch[block_size]
         ); // [block_size]
 
     // current visibility left to render
@@ -262,72 +262,125 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 
     torch::Tensor renders = torch::empty(
         {C, image_height, image_width, channels},
-        means2d.options().dtype(torch::kFloat32)
+        means2d.options()
     );
     torch::Tensor alphas = torch::empty(
         {C, image_height, image_width, 1},
-        means2d.options().dtype(torch::kFloat32)
+        means2d.options()
     );
     torch::Tensor render_planes = torch::empty(
         {C, image_height, image_width, 4},
-        means2d.options().dtype(torch::kFloat32)
+        means2d.options()
     );
     torch::Tensor render_depths = torch::empty(
         {C, image_height, image_width, 1},
-        means2d.options().dtype(torch::kFloat32)
+        means2d.options()
     );
     torch::Tensor last_ids = torch::empty(
         {C, image_height, image_width}, means2d.options().dtype(torch::kInt32)
     );
 
-    at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
-    const uint32_t shared_mem =
-        tile_size * tile_size *
-        (sizeof(int32_t) + sizeof(vec3<float>) + sizeof(vec3<float>));
+    if (means2d.dtype() == torch::kFloat32) {
+        using S = float;
+        at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+        const uint32_t shared_mem =
+                tile_size * tile_size *
+                (sizeof(int32_t) + sizeof(vec3<S>) + sizeof(vec3<S>));
 
-    // TODO: an optimization can be done by passing the actual number of
-    // channels into the kernel functions and avoid necessary global memory
-    // writes. This requires moving the channel padding from python to C side.
-    if (cudaFuncSetAttribute(
-            rasterize_to_pixels_fwd_kernel<CDIM, float>,
-            cudaFuncAttributeMaxDynamicSharedMemorySize,
-            shared_mem
+        // TODO: an optimization can be done by passing the actual number of
+        // channels into the kernel functions and avoid necessary global memory
+        // writes. This requires moving the channel padding from python to C side.
+        if (cudaFuncSetAttribute(
+                rasterize_to_pixels_fwd_kernel<CDIM, S>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                shared_mem
         ) != cudaSuccess) {
-        AT_ERROR(
-            "Failed to set maximum shared memory size (requested ",
-            shared_mem,
-            " bytes), try lowering tile_size."
+            AT_ERROR(
+                    "Failed to set maximum shared memory size (requested ",
+                    shared_mem,
+                    " bytes), try lowering tile_size."
+            );
+        }
+        rasterize_to_pixels_fwd_kernel<CDIM, S>
+        <<<blocks, threads, shared_mem, stream>>>(
+                C,
+                N,
+                n_isects,
+                packed,
+                reinterpret_cast<vec2<S> *>(means2d.data_ptr<S>()),
+                reinterpret_cast<vec3<S> *>(conics.data_ptr<S>()),
+                colors.data_ptr<S>(),
+                opacities.data_ptr<S>(),
+                reinterpret_cast<vec4<S> *>(planes.data_ptr<S>()),
+                Ks.data_ptr<S>(),
+                backgrounds.has_value() ? backgrounds.value().data_ptr<S>()
+                                        : nullptr,
+                masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
+                image_width,
+                image_height,
+                tile_size,
+                tile_width,
+                tile_height,
+                tile_offsets.data_ptr<int32_t>(),
+                flatten_ids.data_ptr<int32_t>(),
+                render_geo,
+                renders.data_ptr<S>(),
+                alphas.data_ptr<S>(),
+                render_planes.data_ptr<S>(),
+                render_depths.data_ptr<S>(),
+                last_ids.data_ptr<int32_t>()
+        );
+    } else if (means2d.dtype() == torch::kFloat64) {
+        using S = double;
+        at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+        const uint32_t shared_mem =
+                tile_size * tile_size *
+                (sizeof(int32_t) + sizeof(vec3<S>) + sizeof(vec3<S>));
+
+        // TODO: an optimization can be done by passing the actual number of
+        // channels into the kernel functions and avoid necessary global memory
+        // writes. This requires moving the channel padding from python to C side.
+        if (cudaFuncSetAttribute(
+                rasterize_to_pixels_fwd_kernel<CDIM, S>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                shared_mem
+        ) != cudaSuccess) {
+            AT_ERROR(
+                    "Failed to set maximum shared memory size (requested ",
+                    shared_mem,
+                    " bytes), try lowering tile_size."
+            );
+        }
+        rasterize_to_pixels_fwd_kernel<CDIM, S>
+        <<<blocks, threads, shared_mem, stream>>>(
+                C,
+                N,
+                n_isects,
+                packed,
+                reinterpret_cast<vec2<S> *>(means2d.data_ptr<S>()),
+                reinterpret_cast<vec3<S> *>(conics.data_ptr<S>()),
+                colors.data_ptr<S>(),
+                opacities.data_ptr<S>(),
+                reinterpret_cast<vec4<S> *>(planes.data_ptr<S>()),
+                Ks.data_ptr<S>(),
+                backgrounds.has_value() ? backgrounds.value().data_ptr<S>()
+                                        : nullptr,
+                masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
+                image_width,
+                image_height,
+                tile_size,
+                tile_width,
+                tile_height,
+                tile_offsets.data_ptr<int32_t>(),
+                flatten_ids.data_ptr<int32_t>(),
+                render_geo,
+                renders.data_ptr<S>(),
+                alphas.data_ptr<S>(),
+                render_planes.data_ptr<S>(),
+                render_depths.data_ptr<S>(),
+                last_ids.data_ptr<int32_t>()
         );
     }
-    rasterize_to_pixels_fwd_kernel<CDIM, float>
-        <<<blocks, threads, shared_mem, stream>>>(
-            C,
-            N,
-            n_isects,
-            packed,
-            reinterpret_cast<vec2<float> *>(means2d.data_ptr<float>()),
-            reinterpret_cast<vec3<float> *>(conics.data_ptr<float>()),
-            colors.data_ptr<float>(),
-            opacities.data_ptr<float>(),
-            reinterpret_cast<vec4<float> *>(planes.data_ptr<float>()),
-            Ks.data_ptr<float>(),
-            backgrounds.has_value() ? backgrounds.value().data_ptr<float>()
-                                    : nullptr,
-            masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
-            image_width,
-            image_height,
-            tile_size,
-            tile_width,
-            tile_height,
-            tile_offsets.data_ptr<int32_t>(),
-            flatten_ids.data_ptr<int32_t>(),
-            render_geo,
-            renders.data_ptr<float>(),
-            alphas.data_ptr<float>(),
-            render_planes.data_ptr<float>(),
-            render_depths.data_ptr<float>(),
-            last_ids.data_ptr<int32_t>()
-        );
 
     return std::make_tuple(renders, alphas, render_planes, render_depths, last_ids);
 }

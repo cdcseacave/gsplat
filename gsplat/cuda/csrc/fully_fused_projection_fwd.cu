@@ -241,20 +241,25 @@ fully_fused_projection_fwd_tensor(
         // we dont want NaN to appear in this tensor, so we zero intialize it
         compensations = torch::zeros({C, N}, means.options());
     }
-    if (C && N) {
-        fully_fused_projection_fwd_kernel<float>
-            <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS,
-               GSPLAT_N_THREADS,
-               0,
-               stream>>>(
+    if (!C || !N) {
+        return std::make_tuple(radii, means2d, depths, conics, compensations);
+    }
+
+    if (means.dtype() == torch::kFloat32) {
+        using S = float;
+        fully_fused_projection_fwd_kernel<S>
+        <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS,
+        GSPLAT_N_THREADS,
+        0,
+        stream>>>(
                 C,
                 N,
-                means.data_ptr<float>(),
-                covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
-                quats.has_value() ? quats.value().data_ptr<float>() : nullptr,
-                scales.has_value() ? scales.value().data_ptr<float>() : nullptr,
-                viewmats.data_ptr<float>(),
-                Ks.data_ptr<float>(),
+                means.data_ptr<S>(),
+                covars.has_value() ? covars.value().data_ptr<S>() : nullptr,
+                quats.has_value() ? quats.value().data_ptr<S>() : nullptr,
+                scales.has_value() ? scales.value().data_ptr<S>() : nullptr,
+                viewmats.data_ptr<S>(),
+                Ks.data_ptr<S>(),
                 image_width,
                 image_height,
                 eps2d,
@@ -263,12 +268,43 @@ fully_fused_projection_fwd_tensor(
                 radius_clip,
                 camera_model,
                 radii.data_ptr<int32_t>(),
-                means2d.data_ptr<float>(),
-                depths.data_ptr<float>(),
-                conics.data_ptr<float>(),
-                calc_compensations ? compensations.data_ptr<float>() : nullptr
-            );
+                means2d.data_ptr<S>(),
+                depths.data_ptr<S>(),
+                conics.data_ptr<S>(),
+                calc_compensations ? compensations.data_ptr<S>() : nullptr
+        );
+    } else if (means.dtype() == torch::kFloat64) {
+        using S = double;
+        fully_fused_projection_fwd_kernel<S>
+        <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS,
+        GSPLAT_N_THREADS,
+        0,
+        stream>>>(
+                C,
+                N,
+                means.data_ptr<S>(),
+                covars.has_value() ? covars.value().data_ptr<S>() : nullptr,
+                quats.has_value() ? quats.value().data_ptr<S>() : nullptr,
+                scales.has_value() ? scales.value().data_ptr<S>() : nullptr,
+                viewmats.data_ptr<S>(),
+                Ks.data_ptr<S>(),
+                image_width,
+                image_height,
+                eps2d,
+                near_plane,
+                far_plane,
+                radius_clip,
+                camera_model,
+                radii.data_ptr<int32_t>(),
+                means2d.data_ptr<S>(),
+                depths.data_ptr<S>(),
+                conics.data_ptr<S>(),
+                calc_compensations ? compensations.data_ptr<S>() : nullptr
+        );
+    } else {
+        AT_ERROR("Unsupported data type: ", means.dtype());
     }
+
     return std::make_tuple(radii, means2d, depths, conics, compensations);
 }
 

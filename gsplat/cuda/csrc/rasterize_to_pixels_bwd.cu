@@ -111,13 +111,13 @@ __global__ void rasterize_to_pixels_bwd_kernel(
     extern __shared__ int s[];
     int32_t *id_batch = (int32_t *)s; // [block_size]
     vec3<S> *xy_opacity_batch =
-        reinterpret_cast<vec3<float> *>(&id_batch[block_size]); // [block_size]
+        reinterpret_cast<vec3<S> *>(&id_batch[block_size]); // [block_size]
     vec3<S> *conic_batch =
-        reinterpret_cast<vec3<float> *>(&xy_opacity_batch[block_size]
+        reinterpret_cast<vec3<S> *>(&xy_opacity_batch[block_size]
         );                                         // [block_size]
     S *rgbs_batch = (S *)&conic_batch[block_size]; // [block_size * COLOR_DIM]
     vec4<S> *planes_batch =
-        reinterpret_cast<vec4<float> *>(&rgbs_batch[block_size * COLOR_DIM]); // [block_size * 4]
+        reinterpret_cast<vec4<S> *>(&rgbs_batch[block_size * COLOR_DIM]); // [block_size * 4]
 
     // this is the T AFTER the last gaussian in this pixel
     S T_final = 1.0f - render_alphas[pix_id];
@@ -427,39 +427,46 @@ call_kernel_with_dim(
         v_means2d_abs = torch::zeros_like(means2d);
     }
 
-    if (n_isects) {
+    if (!n_isects) {
+        return std::make_tuple(
+                v_means2d_abs, v_means2d, v_conics, v_colors, v_opacities, v_planes
+        );
+    }
+
+    if (means2d.dtype() == torch::kFloat32) {
+        using S = float;
         const uint32_t shared_mem =
-            tile_size * tile_size *
-            (sizeof(int32_t) + sizeof(vec3<float>) + sizeof(vec3<float>) +
-             sizeof(float) * COLOR_DIM + sizeof(float) * 4);
+                tile_size * tile_size *
+                (sizeof(int32_t) + sizeof(vec3<S>) + sizeof(vec3<S>) +
+                 sizeof(S) * COLOR_DIM + sizeof(S) * 4);
         at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
         if (cudaFuncSetAttribute(
-                rasterize_to_pixels_bwd_kernel<CDIM, float>,
+                rasterize_to_pixels_bwd_kernel<CDIM, S>,
                 cudaFuncAttributeMaxDynamicSharedMemorySize,
                 shared_mem
-            ) != cudaSuccess) {
+        ) != cudaSuccess) {
             AT_ERROR(
-                "Failed to set maximum shared memory size (requested ",
-                shared_mem,
-                " bytes), try lowering tile_size."
+                    "Failed to set maximum shared memory size (requested ",
+                    shared_mem,
+                    " bytes), try lowering tile_size."
             );
         }
-        rasterize_to_pixels_bwd_kernel<CDIM, float>
-            <<<blocks, threads, shared_mem, stream>>>(
+        rasterize_to_pixels_bwd_kernel<CDIM, S>
+        <<<blocks, threads, shared_mem, stream>>>(
                 C,
                 N,
                 n_isects,
                 packed,
-                reinterpret_cast<vec2<float> *>(means2d.data_ptr<float>()),
-                reinterpret_cast<vec3<float> *>(conics.data_ptr<float>()),
-                colors.data_ptr<float>(),
-                opacities.data_ptr<float>(),
-                reinterpret_cast<vec4<float> *>(planes.data_ptr<float>()),
-                backgrounds.has_value() ? backgrounds.value().data_ptr<float>()
+                reinterpret_cast<vec2<S> *>(means2d.data_ptr<S>()),
+                reinterpret_cast<vec3<S> *>(conics.data_ptr<S>()),
+                colors.data_ptr<S>(),
+                opacities.data_ptr<S>(),
+                reinterpret_cast<vec4<S> *>(planes.data_ptr<S>()),
+                backgrounds.has_value() ? backgrounds.value().data_ptr<S>()
                                         : nullptr,
                 masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
-                Ks.data_ptr<float>(),
+                Ks.data_ptr<S>(),
                 image_width,
                 image_height,
                 tile_size,
@@ -467,24 +474,83 @@ call_kernel_with_dim(
                 tile_height,
                 tile_offsets.data_ptr<int32_t>(),
                 flatten_ids.data_ptr<int32_t>(),
-                render_alphas.data_ptr<float>(),
-                render_planes.data_ptr<float>(),
+                render_alphas.data_ptr<S>(),
+                render_planes.data_ptr<S>(),
                 last_ids.data_ptr<int32_t>(),
-                v_render_colors.data_ptr<float>(),
-                v_render_alphas.data_ptr<float>(),
-                v_render_planes.data_ptr<float>(),
-                v_render_depths.data_ptr<float>(),
-                absgrad ? reinterpret_cast<vec2<float> *>(
-                              v_means2d_abs.data_ptr<float>()
-                          )
+                v_render_colors.data_ptr<S>(),
+                v_render_alphas.data_ptr<S>(),
+                v_render_planes.data_ptr<S>(),
+                v_render_depths.data_ptr<S>(),
+                absgrad ? reinterpret_cast<vec2<S> *>(
+                        v_means2d_abs.data_ptr<S>()
+                )
                         : nullptr,
-                reinterpret_cast<vec2<float> *>(v_means2d.data_ptr<float>()),
-                reinterpret_cast<vec3<float> *>(v_conics.data_ptr<float>()),
-                v_colors.data_ptr<float>(),
-                v_opacities.data_ptr<float>(),
-                reinterpret_cast<vec4<float> *>(v_planes.data_ptr<float>()),
+                reinterpret_cast<vec2<S> *>(v_means2d.data_ptr<S>()),
+                reinterpret_cast<vec3<S> *>(v_conics.data_ptr<S>()),
+                v_colors.data_ptr<S>(),
+                v_opacities.data_ptr<S>(),
+                reinterpret_cast<vec4<S> *>(v_planes.data_ptr<S>()),
                 render_geo
+        );
+    } else if (means2d.dtype() == torch::kFloat64) {
+        using S = double;
+        const uint32_t shared_mem =
+                tile_size * tile_size *
+                (sizeof(int32_t) + sizeof(vec3<S>) + sizeof(vec3<S>) +
+                 sizeof(S) * COLOR_DIM + sizeof(S) * 4);
+        at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+
+        if (cudaFuncSetAttribute(
+                rasterize_to_pixels_bwd_kernel<CDIM, S>,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                shared_mem
+        ) != cudaSuccess) {
+            AT_ERROR(
+                    "Failed to set maximum shared memory size (requested ",
+                    shared_mem,
+                    " bytes), try lowering tile_size."
             );
+        }
+        rasterize_to_pixels_bwd_kernel<CDIM, S>
+        <<<blocks, threads, shared_mem, stream>>>(
+                C,
+                N,
+                n_isects,
+                packed,
+                reinterpret_cast<vec2<S> *>(means2d.data_ptr<S>()),
+                reinterpret_cast<vec3<S> *>(conics.data_ptr<S>()),
+                colors.data_ptr<S>(),
+                opacities.data_ptr<S>(),
+                reinterpret_cast<vec4<S> *>(planes.data_ptr<S>()),
+                backgrounds.has_value() ? backgrounds.value().data_ptr<S>()
+                                        : nullptr,
+                masks.has_value() ? masks.value().data_ptr<bool>() : nullptr,
+                Ks.data_ptr<S>(),
+                image_width,
+                image_height,
+                tile_size,
+                tile_width,
+                tile_height,
+                tile_offsets.data_ptr<int32_t>(),
+                flatten_ids.data_ptr<int32_t>(),
+                render_alphas.data_ptr<S>(),
+                render_planes.data_ptr<S>(),
+                last_ids.data_ptr<int32_t>(),
+                v_render_colors.data_ptr<S>(),
+                v_render_alphas.data_ptr<S>(),
+                v_render_planes.data_ptr<S>(),
+                v_render_depths.data_ptr<S>(),
+                absgrad ? reinterpret_cast<vec2<S> *>(
+                        v_means2d_abs.data_ptr<S>()
+                )
+                        : nullptr,
+                reinterpret_cast<vec2<S> *>(v_means2d.data_ptr<S>()),
+                reinterpret_cast<vec3<S> *>(v_conics.data_ptr<S>()),
+                v_colors.data_ptr<S>(),
+                v_opacities.data_ptr<S>(),
+                reinterpret_cast<vec4<S> *>(v_planes.data_ptr<S>()),
+                render_geo
+        );
     }
 
     return std::make_tuple(

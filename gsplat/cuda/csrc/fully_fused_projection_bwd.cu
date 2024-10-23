@@ -327,41 +327,82 @@ fully_fused_projection_bwd_tensor(
     if (viewmats_requires_grad) {
         v_viewmats = torch::zeros_like(viewmats);
     }
-    if (C && N) {
-        fully_fused_projection_bwd_kernel<float>
-            <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS,
-               GSPLAT_N_THREADS,
-               0,
-               stream>>>(
+    if (!C || !N) {
+        return std::make_tuple(v_means, v_covars, v_quats, v_scales, v_viewmats);
+    }
+
+    if (means.dtype() == torch::kFloat32) {
+        using S = float;
+        fully_fused_projection_bwd_kernel<S>
+        <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS,
+        GSPLAT_N_THREADS,
+        0,
+        stream>>>(
                 C,
                 N,
-                means.data_ptr<float>(),
-                covars.has_value() ? covars.value().data_ptr<float>() : nullptr,
-                covars.has_value() ? nullptr : quats.value().data_ptr<float>(),
-                covars.has_value() ? nullptr : scales.value().data_ptr<float>(),
-                viewmats.data_ptr<float>(),
-                Ks.data_ptr<float>(),
+                means.data_ptr<S>(),
+                covars.has_value() ? covars.value().data_ptr<S>() : nullptr,
+                covars.has_value() ? nullptr : quats.value().data_ptr<S>(),
+                covars.has_value() ? nullptr : scales.value().data_ptr<S>(),
+                viewmats.data_ptr<S>(),
+                Ks.data_ptr<S>(),
                 image_width,
                 image_height,
                 eps2d,
                 camera_model,
                 radii.data_ptr<int32_t>(),
-                conics.data_ptr<float>(),
+                conics.data_ptr<S>(),
                 compensations.has_value()
-                    ? compensations.value().data_ptr<float>()
-                    : nullptr,
-                v_means2d.data_ptr<float>(),
-                v_depths.data_ptr<float>(),
-                v_conics.data_ptr<float>(),
+                ? compensations.value().data_ptr<S>()
+                : nullptr,
+                v_means2d.data_ptr<S>(),
+                v_depths.data_ptr<S>(),
+                v_conics.data_ptr<S>(),
                 v_compensations.has_value()
-                    ? v_compensations.value().data_ptr<float>()
-                    : nullptr,
-                v_means.data_ptr<float>(),
-                covars.has_value() ? v_covars.data_ptr<float>() : nullptr,
-                covars.has_value() ? nullptr : v_quats.data_ptr<float>(),
-                covars.has_value() ? nullptr : v_scales.data_ptr<float>(),
-                viewmats_requires_grad ? v_viewmats.data_ptr<float>() : nullptr
-            );
+                ? v_compensations.value().data_ptr<S>()
+                : nullptr,
+                v_means.data_ptr<S>(),
+                covars.has_value() ? v_covars.data_ptr<S>() : nullptr,
+                covars.has_value() ? nullptr : v_quats.data_ptr<S>(),
+                covars.has_value() ? nullptr : v_scales.data_ptr<S>(),
+                viewmats_requires_grad ? v_viewmats.data_ptr<S>() : nullptr
+        );
+    } else if (means.dtype() == torch::kFloat32) {
+        using S = double;
+        fully_fused_projection_bwd_kernel<S>
+        <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS,
+        GSPLAT_N_THREADS,
+        0,
+        stream>>>(
+                C,
+                N,
+                means.data_ptr<S>(),
+                covars.has_value() ? covars.value().data_ptr<S>() : nullptr,
+                covars.has_value() ? nullptr : quats.value().data_ptr<S>(),
+                covars.has_value() ? nullptr : scales.value().data_ptr<S>(),
+                viewmats.data_ptr<S>(),
+                Ks.data_ptr<S>(),
+                image_width,
+                image_height,
+                eps2d,
+                camera_model,
+                radii.data_ptr<int32_t>(),
+                conics.data_ptr<S>(),
+                compensations.has_value()
+                ? compensations.value().data_ptr<S>()
+                : nullptr,
+                v_means2d.data_ptr<S>(),
+                v_depths.data_ptr<S>(),
+                v_conics.data_ptr<S>(),
+                v_compensations.has_value()
+                ? v_compensations.value().data_ptr<S>()
+                : nullptr,
+                v_means.data_ptr<S>(),
+                covars.has_value() ? v_covars.data_ptr<S>() : nullptr,
+                covars.has_value() ? nullptr : v_quats.data_ptr<S>(),
+                covars.has_value() ? nullptr : v_scales.data_ptr<S>(),
+                viewmats_requires_grad ? v_viewmats.data_ptr<S>() : nullptr
+        );
     }
     return std::make_tuple(v_means, v_covars, v_quats, v_scales, v_viewmats);
 }
