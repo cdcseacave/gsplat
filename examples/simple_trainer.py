@@ -782,6 +782,9 @@ class Runner:
                     + cfg.scale_reg * torch.abs(torch.exp(self.splats["scales"])).mean()
                 )
 
+            if torch.isnan(loss).any() or torch.isinf(loss).any():
+                print("*************** Loss contains NaN or Inf values *****************")
+            # torch.autograd.set_detect_anomaly(True) # slow down training
             loss.backward()
 
             desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
