@@ -83,11 +83,11 @@ class Config:
     steps_scaler: float = 1.0
 
     # Number of training steps
-    max_steps: int = 15_000
+    max_steps: int = 30_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000, 15_000])
+    eval_steps: List[int] = field(default_factory=lambda: [15_000, 30_000])
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [7_000, 15_000])
+    save_steps: List[int] = field(default_factory=lambda: [15_000, 30_000])
 
     # Initialization strategy
     init_type: str = "sfm"
@@ -169,7 +169,7 @@ class Config:
     depth_lambda: float = 1e-2
 
     # Enable normal consistency loss. (Currently for RaDe-GS only)
-    normal_loss: bool = False
+    normal_loss: bool = True
     # Weight for normal loss
     normal_lambda: float = 5e-2
     # Iteration to start normal consistency regulerization
@@ -746,7 +746,7 @@ class Runner:
                 tvloss = 10 * total_variation_loss(self.bil_grids.grids)
                 loss += tvloss
 
-            if cfg.normal_loss and (cfg.rasterization_method == "radegs_inria" or cfg.rasterization_method == "radegs"):
+            if cfg.normal_loss:
                 if step > cfg.normal_start_iter:
                     curr_normal_lambda = cfg.normal_lambda
                 else:
