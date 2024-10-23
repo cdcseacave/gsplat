@@ -33,12 +33,60 @@ def normalized_quat_to_rotmat(quat: Tensor) -> Tensor:
     return mat.reshape(quat.shape[:-1] + (3, 3))
 
 
+def quat_to_rotmat(quat: Tensor) -> Tensor:
+    """
+    Convert rotations given as quaternions to rotation matrices.
+
+    Args:
+        quaternions: quaternions with real part first,
+            as tensor of shape (..., 4).
+
+    Returns:
+        Rotation matrices as tensor of shape (..., 3, 3).
+    """
+    w, x, y, z = torch.unbind(quat, -1)
+    two_s = 2.0 / (quat * quat).sum(-1)
+
+    o = torch.stack(
+        (
+            1 - two_s * (y * y + z * z),
+            two_s * (x * y - z * w),
+            two_s * (x * z + y * w),
+            two_s * (x * y + z * w),
+            1 - two_s * (x * x + z * z),
+            two_s * (y * z - x * w),
+            two_s * (x * z - y * w),
+            two_s * (y * z + x * w),
+            1 - two_s * (x * x + y * y),
+        ),
+        -1,
+    )
+    return o.reshape(quat.shape[:-1] + (3, 3))
+
+
 def log_transform(x):
     return torch.sign(x) * torch.log1p(torch.abs(x))
 
 
 def inverse_log_transform(y):
     return torch.sign(y) * (torch.expm1(torch.abs(y)))
+
+
+def get_normal_unoriented(quats: Tensor, scales: Tensor) -> Tensor:
+    """Get the unoriented normal of the gaussian in world coordinates as
+    the rotation axis corresponding to the smalles scale."""
+    rotation_matrices = quat_to_rotmat(quats)
+    smallest_axis_idx = scales.min(dim=-1)[1][..., None, None].expand(-1, 3, -1)
+    smallest_axis = rotation_matrices.gather(2, smallest_axis_idx)
+    return smallest_axis.squeeze(dim=2)
+
+def get_normal(means: Tensor, quats: Tensor, scales: Tensor, camera_center: Tensor) -> Tensor:
+    """Get the oriented normal of the gaussian in world coordintes."""
+    normal_global = get_normal_unoriented(quats, scales)
+    gaussian_to_cam_global = camera_center - means
+    neg_mask = (normal_global * gaussian_to_cam_global).sum(-1) < 0.0
+    normal_global[neg_mask] = -normal_global[neg_mask]
+    return normal_global
 
 
 def depth_to_points(

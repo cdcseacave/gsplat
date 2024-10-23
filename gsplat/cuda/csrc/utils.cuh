@@ -17,25 +17,20 @@ namespace gsplat {
 template <typename T>
 inline __device__ mat3<T> quat_to_rotmat(const vec4<T> quat) {
     T w = quat[0], x = quat[1], y = quat[2], z = quat[3];
-    // normalize
-    T inv_norm = rsqrt(x * x + y * y + z * z + w * w);
-    x *= inv_norm;
-    y *= inv_norm;
-    z *= inv_norm;
-    w *= inv_norm;
+    T inv_norm = 2.f / (x * x + y * y + z * z + w * w); // normalize
     T x2 = x * x, y2 = y * y, z2 = z * z;
     T xy = x * y, xz = x * z, yz = y * z;
     T wx = w * x, wy = w * y, wz = w * z;
     return mat3<T>(
-        (1.f - 2.f * (y2 + z2)),
-        (2.f * (xy + wz)),
-        (2.f * (xz - wy)), // 1st col
-        (2.f * (xy - wz)),
-        (1.f - 2.f * (x2 + z2)),
-        (2.f * (yz + wx)), // 2nd col
-        (2.f * (xz + wy)),
-        (2.f * (yz - wx)),
-        (1.f - 2.f * (x2 + y2)) // 3rd col
+        (1.f - inv_norm * (y2 + z2)),
+        (inv_norm * (xy + wz)),
+        (inv_norm * (xz - wy)), // 1st col
+        (inv_norm * (xy - wz)),
+        (1.f - inv_norm * (x2 + z2)),
+        (inv_norm * (yz + wx)), // 2nd col
+        (inv_norm * (xz + wy)),
+        (inv_norm * (yz - wx)),
+        (1.f - inv_norm * (x2 + y2)) // 3rd col
     );
 }
 

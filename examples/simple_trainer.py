@@ -83,11 +83,11 @@ class Config:
     steps_scaler: float = 1.0
 
     # Number of training steps
-    max_steps: int = 7_000
+    max_steps: int = 15_000
     # Steps to evaluate the model
-    eval_steps: List[int] = field(default_factory=lambda: [7_000])
+    eval_steps: List[int] = field(default_factory=lambda: [7_000, 15_000])
     # Steps to save the model
-    save_steps: List[int] = field(default_factory=lambda: [7_000])
+    save_steps: List[int] = field(default_factory=lambda: [7_000, 15_000])
 
     # Initialization strategy
     init_type: str = "sfm"
@@ -154,6 +154,9 @@ class Config:
     use_bilateral_grid: bool = False
     # Shape of the bilateral grid (X, Y, W)
     bilateral_grid_shape: Tuple[int, int, int] = (16, 16, 8)
+
+    # Enable geometry computation (depths and normals)
+    render_geometry_start: int = 7_000
 
     # Enable scale loss. (experimental)
     scale_loss: bool = True
@@ -434,6 +437,8 @@ class Runner:
                 ),
             ]
 
+        self.render_geometry = False
+
         # Losses & Metrics.
         self.ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
         self.psnr = PeakSignalNoiseRatio(data_range=1.0).to(self.device)
@@ -466,7 +471,6 @@ class Runner:
         width: int,
         height: int,
         masks: Optional[Tensor] = None,
-        rasterization_method: Literal["gs3d", "radegs", "radegs_inria"] = "gs3d",
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
         means = self.splats["means"]  # [N, 3]
@@ -490,7 +494,7 @@ class Runner:
             colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
 
         rasterize_mode = "antialiased" if self.cfg.antialiased else "classic"
-        if rasterization_method == "gs3d":
+        if self.cfg.rasterization_method == "gs3d":
             render_colors, render_alphas, info = rasterization(
                 means=means,
                 quats=quats,
@@ -510,10 +514,10 @@ class Runner:
                 sparse_grad=self.cfg.sparse_grad,
                 rasterize_mode=rasterize_mode,
                 distributed=self.world_size > 1,
-                render_geo=True,
+                render_geo=self.render_geometry,
                 **kwargs,
             )
-        elif rasterization_method == "radegs":
+        elif self.cfg.rasterization_method == "radegs":
             render_colors, render_alphas, render_depths, render_normals, info = rasterization_radegs(
                 means=means,
                 quats=quats,
@@ -537,7 +541,7 @@ class Runner:
             )
             info['render_depths'] = render_depths
             info['render_normals'] = render_normals
-        elif rasterization_method == "radegs_inria":
+        elif self.cfg.rasterization_method == "radegs_inria":
             (render_colors, render_alphas), info = rasterization_rade_inria_wrapper(
                 means=means,
                 quats=quats,
@@ -568,7 +572,7 @@ class Runner:
             info['render_depths'] = info["depth"]
             info['render_normals'] = info["normals_rend"]
         else:
-            raise ValueError(f"Unknown rasterization type: {rasterization_method}. Supported types are 'gs3d' and 'radegs'.")
+            raise ValueError(f"Unknown rasterization type: {self.cfg.rasterization_method}. Supported types are 'gs3d' and 'radegs'.")
 
         return render_colors, render_alphas, info
 
@@ -666,6 +670,9 @@ class Runner:
             # sh schedule
             sh_degree_to_use = min(step // cfg.sh_degree_interval, cfg.sh_degree)
 
+            # geometry schedule
+            self.render_geometry = self.cfg.render_geometry_start <= step
+
             # forward
             renders, alphas, info = self.rasterize_splats(
                 camtoworlds=camtoworlds,
@@ -678,7 +685,6 @@ class Runner:
                 image_ids=image_ids,
                 render_mode="RGB+ED" if cfg.depth_loss else "RGB",
                 masks=masks,
-                rasterization_method=cfg.rasterization_method
             )
             if renders.shape[-1] == 4:
                 colors, depths = renders[..., 0:3], renders[..., 3:4]
@@ -958,7 +964,6 @@ class Runner:
                 sh_degree=cfg.sh_degree,
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
-                rasterization_method=cfg.rasterization_method,
                 masks=masks
             )  # [1, H, W, 3]
             torch.cuda.synchronize()
@@ -976,11 +981,9 @@ class Runner:
                     canvas,
                 )
 
-                if self.cfg.rasterization_method == "radegs":
-                    render_depths = info['render_depths']
-                    render_normals = info['render_normals']
-                    render_depths = render_depths.squeeze(0).squeeze(0).cpu().numpy()
-                    render_normals = render_normals.squeeze(0).squeeze(0).cpu().numpy()
+                if self.cfg.rasterization_method == "gs3d" or self.cfg.rasterization_method == "radegs":
+                    render_depths = info['render_depths'][0].cpu().numpy()
+                    render_normals = info['render_normals'][0].cpu().numpy()
                     tifffile.imwrite(
                         f"{self.render_dir}/{stage}_step{step}_{i:04d}_depth.tiff",
                         render_depths,
@@ -1055,7 +1058,7 @@ class Runner:
 
             torch.cuda.synchronize()
             tic = time.time()
-            renders, _, _ = self.rasterize_splats(
+            renders, _, info = self.rasterize_splats(
                 camtoworlds=camtoworlds,
                 Ks=Ks,
                 width=width,
@@ -1070,6 +1073,9 @@ class Runner:
 
             colors, depths = renders[..., 0:3], renders[..., 3:4]
             colors = torch.clamp(colors, 0.0, 1.0)
+            if self.cfg.rasterization_method == "gs3d" or self.cfg.rasterization_method == "radegs":
+                depths = info['render_depths'][0].detach()
+                normals = info['render_normals'][0].detach()
 
             # write DMAP
             ID = indices[i]
@@ -1077,6 +1083,7 @@ class Runner:
             image_name = os.path.join('images', os.path.basename(self.parser.image_paths[ID]))
             dmap = {}
             dmap['depth_map'] = depths.cpu().numpy()
+            dmap['normal_map'] = normals.cpu().numpy()
             dmap['file_name'] = image_name
             dmap['reference_view_id'] = ID
             dmap['neighbor_view_ids'] = []
@@ -1180,7 +1187,6 @@ class Runner:
                 near_plane=cfg.near_plane,
                 far_plane=cfg.far_plane,
                 render_mode="RGB+ED",
-                rasterization_method=cfg.rasterization_method
             )  # [1, H, W, 4]
             colors = torch.clamp(renders[..., 0:3], 0.0, 1.0)  # [1, H, W, 3]
             depths = renders[..., 3:4]  # [1, H, W, 1]
@@ -1229,7 +1235,6 @@ class Runner:
             height=H,
             sh_degree=self.cfg.sh_degree,  # active all SH degrees
             radius_clip=3.0,  # skip GSs that have small image radius (in pixels)
-            rasterization_method=self.cfg.rasterization_method
         )  # [1, H, W, 3]
         return render_colors[0].cpu().numpy()
 

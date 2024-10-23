@@ -26,7 +26,7 @@ from .distributed import (
     all_to_all_int32,
     all_to_all_tensor_list,
 )
-from .utils import depth_to_normal, get_projection_matrix
+from .utils import get_normal, depth_to_normal, get_projection_matrix
 
 
 def rasterization(
@@ -529,40 +529,8 @@ def rasterization(
         }
     )
 
-    def _quat_to_rotmat(quats: Tensor) -> Tensor:
-        """Convert quaternion to rotation matrix."""
-        quats = F.normalize(quats, p=2, dim=-1)
-        w, x, y, z = torch.unbind(quats, dim=-1)
-        R = torch.stack(
-            [
-                1 - 2 * (y**2 + z**2),
-                2 * (x * y - w * z),
-                2 * (x * z + w * y),
-                2 * (x * y + w * z),
-                1 - 2 * (x**2 + z**2),
-                2 * (y * z - w * x),
-                2 * (x * z - w * y),
-                2 * (y * z + w * x),
-                1 - 2 * (x**2 + y**2),
-            ],
-            dim=-1,
-        )
-        return R.reshape(quats.shape[:-1] + (3, 3))
-
-    def get_smallest_axis(quats: Tensor, scales: Tensor) -> Tensor:
-        rotation_matrices = _quat_to_rotmat(quats)
-        smallest_axis_idx = scales.min(dim=-1)[1][..., None, None].expand(-1, 3, -1)
-        smallest_axis = rotation_matrices.gather(2, smallest_axis_idx)
-        return smallest_axis.squeeze(dim=2)
-    
-    def get_normal(means: Tensor, quats: Tensor, scales: Tensor, camera_center: Tensor) -> Tensor:
-        normal_global = get_smallest_axis(quats, scales)
-        gaussian_to_cam_global = camera_center - means
-        neg_mask = (normal_global * gaussian_to_cam_global).sum(-1) < 0.0
-        normal_global[neg_mask] = -normal_global[neg_mask]
-        return normal_global
-
     #viewmats: world to camera transformation matrices. [C, 4, 4].
+    assert C == 1, "todo: support multiple cameras"
     Rot = viewmats[0, :3, :3]  # [C, 3, 3]
     t = viewmats[0, :3, 3]  # [C, 3]
     Center = Rot.T @ -t
@@ -622,7 +590,7 @@ def rasterization(
             absgrad=absgrad,
             render_geo=render_geo,
         )
-        render_normals = render_planes[0:3]
+        render_normals = render_planes[..., 0:3]
         render_normals = render_normals/(render_normals.norm(dim=-1, keepdim=True)+1.0e-8)
         meta.update(
             {
