@@ -671,7 +671,7 @@ class Runner:
             sh_degree_to_use = min(step // cfg.sh_degree_interval, cfg.sh_degree)
 
             # geometry schedule
-            self.render_geometry = self.cfg.render_geometry_start <= step
+            self.render_geometry = step >= self.cfg.render_geometry_start
 
             # forward
             renders, alphas, info = self.rasterize_splats(

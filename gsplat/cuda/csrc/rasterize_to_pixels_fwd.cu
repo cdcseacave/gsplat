@@ -204,7 +204,7 @@ __global__ void rasterize_to_pixels_fwd_kernel(
             GSPLAT_PRAGMA_UNROLL
 			for (int k = 0; k < 4; ++k)
 				render_planes[pix_id * 4 + k] = plane_out[k];
-			render_depths[pix_id] = plane_out[3] / -(plane_out[0] * ray.x + plane_out[1] * ray.y + plane_out[2] + 1.0e-8);
+			render_depths[pix_id] = plane_out[3] / (plane_out[0] * ray.x + plane_out[1] * ray.y + plane_out[2] + 1.0e-8);
 		}
         // index in bin of last gaussian in this pixel
         last_ids[pix_id] = static_cast<int32_t>(cur_idx);
