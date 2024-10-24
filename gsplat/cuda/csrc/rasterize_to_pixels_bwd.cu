@@ -146,9 +146,9 @@ __global__ void rasterize_to_pixels_bwd_kernel(
         const S distance = render_planes[pix_id*4+3];
         const S tmp = (normal.x * ray.x + normal.y * ray.y + normal.z + 1.0e-8);
         v_render_p[3] += v_render_depths[pix_id] / tmp;
-        v_render_p[0] += v_render_depths[pix_id] * (distance / (tmp * tmp) * ray.x);
-        v_render_p[1] += v_render_depths[pix_id] * (distance / (tmp * tmp) * ray.y);
-        v_render_p[2] += v_render_depths[pix_id] * (distance / (tmp * tmp));
+        v_render_p[0] -= v_render_depths[pix_id] * (distance / (tmp * tmp) * ray.x);
+        v_render_p[1] -= v_render_depths[pix_id] * (distance / (tmp * tmp) * ray.y);
+        v_render_p[2] -= v_render_depths[pix_id] * (distance / (tmp * tmp));
     }
     const S v_render_a = v_render_alphas[pix_id];
 
